@@ -3,7 +3,7 @@ const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
 
 // 🔐 ТВОИ КЛЮЧИ — ВСТАВЬ СЮДА
-const APP_ID = '50256'; // например, '123456'
+const APP_ID = '50254'; // например, '123456'
 const APP_SECRET = 'JfZ5bOVZHUbGTCj6PDxvYX75oD5MiwRP'; // например, 'abc123def456...'
 
 // ID событий запуска/остановки двигателя
