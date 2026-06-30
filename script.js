@@ -272,6 +272,46 @@ async function fetchEvents(login, password, dateFrom, useProxy) {
     if (userLoginData.state !== 1) throw new Error('Ошибка авторизации пользователя: ' + JSON.stringify(userLoginData));
     const userToken = userLoginData.desc.user_token;
 
+    // 4. Получаем список устройств (используем slid_token в заголовке)
+    const devicesRes = await fetchWithProxy(
+        `${STARLINE_API_URL}/json/v2/user/1937631/user_info`,
+        {
+            headers: { 
+                'Authorization': `Bearer ${userToken}`,
+                'Content-Type': 'application/json'
+            }
+        },
+        useProxy
+    );
+    const devicesData = await devicesRes.json();
+    
+    // Проверяем ответ (может быть code: 200 или code: "200")
+    if (devicesData.code != 200) throw new Error('Ошибка получения устройств: ' + JSON.stringify(devicesData));
+    
+    const deviceId = devicesData.devices?.[0]?.device_id;
+    if (!deviceId) throw new Error('Не найдено ни одного устройства. Ответ: ' + JSON.stringify(devicesData));
+
+    // 5. Получаем историю событий
+    const startTime = Math.floor(dateFrom.getTime() / 1000);
+    const endTime = Math.floor(Date.now() / 1000);
+    
+    const eventsRes = await fetchWithProxy(
+        `${STARLINE_API_URL}/json/v2/device/${deviceId}/events`,
+        {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${userToken}`
+            },
+            body: JSON.stringify({ from: startTime, to: endTime })
+        },
+        useProxy
+    );
+    const eventsData = await eventsRes.json();
+    
+    return eventsData.events || [];
+}
+
     // 4. Получаем slnet_token
     const slnetRes = await fetchWithProxy(
         `${STARLINE_API_URL}/json/v2/auth.slid`,
