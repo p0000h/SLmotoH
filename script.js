@@ -238,34 +238,27 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== Авторизация в StarLine Open API =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    const log = (msg, data) => console.log(`[StarLine] ${msg}`, data || '');
-    
     // 1. Получаем код приложения
-    log('Шаг 1: getCode');
     const secretMd5 = md5(APP_SECRET);
     const codeRes = await fetchWithProxy(
         `${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`,
         {}, useProxy
     );
     const codeData = await codeRes.json();
-    log('getCode:', codeData);
     if (codeData.state !== 1) throw new Error('Ошибка getCode: ' + JSON.stringify(codeData));
     const appCode = codeData.desc.code;
 
     // 2. Получаем токен приложения
-    log('Шаг 2: getToken');
     const secretCodeMd5 = md5(APP_SECRET + appCode);
     const tokenRes = await fetchWithProxy(
         `${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`,
         {}, useProxy
     );
     const tokenData = await tokenRes.json();
-    log('getToken:', tokenData);
     if (tokenData.state !== 1) throw new Error('Ошибка getToken: ' + JSON.stringify(tokenData));
     const appToken = tokenData.desc.token;
 
     // 3. Авторизация пользователя
-    log('Шаг 3: user/login');
     const passwordSha1 = await sha1(password);
     let body = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
     if (captchaSid && captchaCode) {
@@ -281,7 +274,6 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         }, useProxy
     );
     const userLoginData = await userLoginRes.json();
-    log('user/login:', userLoginData);
 
     if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
         pendingLoginData = { login, password, dateFrom, useProxy };
@@ -296,10 +288,8 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         throw new Error('Ошибка login: ' + JSON.stringify(userLoginData));
     }
     const userToken = userLoginData.desc.user_token;
-    log('userToken получен:', userToken.substring(0, 20) + '...');
 
     // 4. Получаем slnet через auth.slid
-    log('Шаг 4: auth.slid');
     const slnetRes = await fetchWithProxy(
         `${STARLINE_API_URL}/json/v2/auth.slid`,
         {
@@ -309,73 +299,42 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         }, useProxy
     );
     const slnetData = await slnetRes.json();
-    log('auth.slid ответ:', slnetData);
-    log('auth.slid headers:', [...slnetRes.headers.entries()]);
     
     if (slnetData.code != 200) throw new Error('Ошибка auth.slid: ' + JSON.stringify(slnetData));
     
-    // Пытаемся получить slnet токен из разных мест
-    const setCookieHeader = slnetRes.headers.get('X-Set-Cookie') || slnetRes.headers.get('Set-Cookie');
-    let slnetToken = slnetData.slnet;
-    if (!slnetToken && setCookieHeader) {
+    // Получаем slnet токен из X-Set-Cookie
+    const setCookieHeader = slnetRes.headers.get('X-Set-Cookie');
+    let slnetToken = null;
+    if (setCookieHeader) {
         const match = setCookieHeader.match(/slnet=([^;]+)/);
         if (match) slnetToken = match[1];
     }
+    if (!slnetToken && slnetData.slnet) slnetToken = slnetData.slnet;
     
     const userId = slnetData.user_id;
-    log('userId:', userId, 'slnetToken:', slnetToken ? slnetToken.substring(0, 20) + '...' : 'НЕТ!');
-    
     if (!userId) throw new Error('Не получен user_id: ' + JSON.stringify(slnetData));
-    if (!slnetToken) throw new Error('Не получен slnet токен. Ответ: ' + JSON.stringify(slnetData));
+    if (!slnetToken) throw new Error('Не получен slnet токен из auth.slid');
 
-    // 5. Получаем список устройств — пробуем Authorization Bearer с user_token
-    log('Шаг 5: user_info с Bearer token');
+    // 5. Получаем список устройств — отправляем Cookie через X-Cookie
     const devicesRes = await fetchWithProxy(
         `${STARLINE_API_URL}/json/v2/user/${userId}/user_info`,
         {
             headers: { 
-                'Authorization': `Bearer ${userToken}`,
+                'X-Cookie': `slnet=${slnetToken}`,
                 'Content-Type': 'application/json'
             }
         }, useProxy
     );
     const devicesData = await devicesRes.json();
-    log('user_info ответ:', devicesData);
     
-    if (devicesData.code != 200) {
-        // Пробуем с Cookie slnet
-        log('Пробуем с Cookie slnet...');
-        const devicesRes2 = await fetchWithProxy(
-            `${STARLINE_API_URL}/json/v2/user/${userId}/user_info`,
-            {
-                headers: { 
-                    'Cookie': `slnet=${slnetToken}`,
-                    'Content-Type': 'application/json'
-                }
-            }, useProxy
-        );
-        const devicesData2 = await devicesRes2.json();
-        log('user_info с Cookie:', devicesData2);
-        
-        if (devicesData2.code != 200) {
-            throw new Error('Ошибка user_info (оба варианта): ' + 
-                'Bearer: ' + JSON.stringify(devicesData) + 
-                ' | Cookie: ' + JSON.stringify(devicesData2));
-        }
-        var finalDevicesData = devicesData2;
-    } else {
-        var finalDevicesData = devicesData;
-    }
+    if (devicesData.code != 200) throw new Error('Ошибка user_info: ' + JSON.stringify(devicesData));
     
-    const deviceId = finalDevicesData.devices?.[0]?.device_id;
-    if (!deviceId) throw new Error('Не найдено устройств: ' + JSON.stringify(finalDevicesData));
-    log('Найден deviceId:', deviceId);
+    const deviceId = devicesData.devices?.[0]?.device_id;
+    if (!deviceId) throw new Error('Не найдено устройств: ' + JSON.stringify(devicesData));
 
     // 6. Получаем историю событий
-    log('Шаг 6: events');
     const startTime = Math.floor(dateFrom.getTime() / 1000);
     const endTime = Math.floor(Date.now() / 1000);
-    log('Период:', startTime, '-', endTime);
     
     const eventsRes = await fetchWithProxy(
         `${STARLINE_API_URL}/json/v2/device/${deviceId}/events`,
@@ -383,13 +342,12 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${userToken}`
+                'X-Cookie': `slnet=${slnetToken}`
             },
             body: JSON.stringify({ from: startTime, to: endTime })
         }, useProxy
     );
     const eventsData = await eventsRes.json();
-    log('events ответ:', eventsData);
     
     return eventsData.events || [];
 }
