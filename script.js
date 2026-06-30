@@ -2,17 +2,15 @@
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
 
-// ID событий запуска/остановки двигателя (из Android-проекта)
+// ID событий запуска/остановки двигателя
 const START_COMMANDS = [1037, 20532, 601];
 const STOP_COMMANDS = [1042, 602];
 
-// CORS-прокси (если нужно)
+// CORS-прокси
 const CORS_PROXIES = [
     'https://corsproxy.io/?',
     'https://api.allorigins.win/raw?url=',
 ];
-
-let currentProxyIndex = 0;
 
 // ===== DOM элементы =====
 const form = document.getElementById('loginForm');
@@ -21,13 +19,13 @@ const errorEl = document.getElementById('error');
 const resultsEl = document.getElementById('results');
 const submitBtn = document.getElementById('submitBtn');
 
-// Установим дату по умолчанию — месяц назад
+// Дата по умолчанию — месяц назад
 const dateInput = document.getElementById('dateFrom');
 const monthAgo = new Date();
 monthAgo.setMonth(monthAgo.getMonth() - 1);
 dateInput.value = monthAgo.toISOString().split('T')[0];
 
-// ===== Восстановление данных =====
+// Восстановление данных
 window.addEventListener('load', () => {
     const saved = localStorage.getItem('starline_creds');
     if (saved) {
@@ -41,7 +39,7 @@ window.addEventListener('load', () => {
     }
 });
 
-// ===== Обработка формы =====
+// Обработка формы
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -52,12 +50,10 @@ form.addEventListener('submit', async (e) => {
     const dateFrom = new Date(document.getElementById('dateFrom').value);
     const useProxy = document.getElementById('useProxy').checked;
 
-    // Сохраним данные (кроме пароля и секрета)
     localStorage.setItem('starline_creds', JSON.stringify({
         login, appId, dateFrom: document.getElementById('dateFrom').value, useProxy
     }));
 
-    // UI
     submitBtn.disabled = true;
     loadingEl.classList.remove('hidden');
     errorEl.classList.add('hidden');
@@ -75,30 +71,17 @@ form.addEventListener('submit', async (e) => {
     }
 });
 
-// ===== Вспомогательные функции для хэширования =====
-async function md5(str) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hashBuffer = await crypto.subtle.digest('MD5', data); // Не поддерживается в браузере!
-    // Используем библиотеку или полифилл
-    return hex(hashBuffer);
-}
-
+// ===== SHA-1 через crypto.subtle =====
 async function sha1(str) {
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
     const hashBuffer = await crypto.subtle.digest('SHA-1', data);
-    return hex(hashBuffer);
-}
-
-function hex(buffer) {
-    const hashArray = Array.from(new Uint8Array(buffer));
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ===== MD5 полифилл (так как crypto.subtle не поддерживает MD5) =====
-// Используем встроенную реализацию
-function md5Polyfill(string) {
+// ===== MD5 полифилл (исправленный) =====
+function md5(string) {
     function md5cycle(x, k) {
         var a = x[0], b = x[1], c = x[2], d = x[3];
         a = ff(a, b, c, d, k[0], 7, -680876936);
@@ -214,18 +197,15 @@ function md5Polyfill(string) {
     function add32(a, b) {
         return (a + b) & 0xFFFFFFFF;
     }
-    function hex_md5(s) {
-        return hex(md51(s));
-    }
     function hex(arr) {
-        var hex_chr = '0123456789abcdef'.split('');
+        var hex_chr = '0123456789abcdef'; // ИСПРАВЛЕНО: строка, не массив!
         var str = '';
         for (var j = 0; j < 4; j++)
             for (var i = 0; i < 4; i++)
                 str += hex_chr.charAt((arr[j] >> (i * 8 + 4)) & 0x0F) + hex_chr.charAt((arr[j] >> (i * 8)) & 0x0F);
         return str;
     }
-    return hex_md5(string);
+    return hex(md51(string));
 }
 
 // ===== Сеть: запросы с CORS-прокси =====
@@ -255,7 +235,7 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 // ===== Авторизация в StarLine Open API =====
 async function fetchEvents(login, password, appId, appSecret, dateFrom, useProxy) {
     // 1. Получаем код приложения
-    const secretMd5 = md5Polyfill(appSecret);
+    const secretMd5 = md5(appSecret);
     const codeRes = await fetchWithProxy(
         `${STARLINE_ID_URL}/application/getCode?appId=${appId}&secret=${secretMd5}`,
         {},
@@ -266,7 +246,7 @@ async function fetchEvents(login, password, appId, appSecret, dateFrom, useProxy
     const appCode = codeData.desc.code;
 
     // 2. Получаем токен приложения
-    const secretCodeMd5 = md5Polyfill(appSecret + appCode);
+    const secretCodeMd5 = md5(appSecret + appCode);
     const tokenRes = await fetchWithProxy(
         `${STARLINE_ID_URL}/application/getToken?appId=${appId}&secret=${secretCodeMd5}`,
         {},
@@ -343,13 +323,12 @@ async function fetchEvents(login, password, appId, appSecret, dateFrom, useProxy
     return eventsData.events || [];
 }
 
-// ===== Подсчёт моточасов (логика из Android-проекта) =====
+// ===== Подсчёт моточасов =====
 function calculateEngineHours(rawEvents) {
     if (!rawEvents || rawEvents.length < 2) {
         return { totalMs: 0, sessions: [], byDay: [] };
     }
 
-    // Парсим события
     const allEvents = rawEvents
         .map(e => ({
             eventId: e.event_id || e.type,
@@ -362,12 +341,10 @@ function calculateEngineHours(rawEvents) {
         return { totalMs: 0, sessions: [], byDay: [] };
     }
 
-    // Если первое событие — остановка, удаляем
     if (STOP_COMMANDS.includes(allEvents[0].eventId)) {
         allEvents.shift();
     }
 
-    // Собираем пары: запуск → остановка
     const sessions = [];
     let totalMs = 0;
 
@@ -387,7 +364,6 @@ function calculateEngineHours(rawEvents) {
         }
     }
 
-    // Группируем по дням
     const byDayMap = {};
     for (const s of sessions) {
         const dayKey = s.start.toISOString().split('T')[0];
