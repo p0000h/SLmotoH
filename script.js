@@ -275,29 +275,12 @@ async function fetchEvents(login, password, dateFrom, useProxy) {
     if (userLoginData.state !== 1) throw new Error('Ошибка авторизации пользователя: ' + JSON.stringify(userLoginData));
     const userToken = userLoginData.desc.user_token;
 
-    // 4. Получаем slnet_token и user_id
-    const slnetRes = await fetchWithProxy(
-        `${STARLINE_API_URL}/json/v2/auth.slid`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slid_token: userToken })
-        },
-        useProxy
-    );
-    const slnetData = await slnetRes.json();
-    
-    if (snetData.code != 200) throw new Error('Ошибка получения slnet токена: ' + JSON.stringify(slnetData));
-    
-    const userId = slnetData.user_id;
-    if (!userId) throw new Error('Не получен user_id из ответа: ' + JSON.stringify(slnetData));
-
-    // 5. Получаем список устройств (используем Cookie slnet)
+    // 4. Получаем список устройств (используем Authorization Bearer)
     const devicesRes = await fetchWithProxy(
-        `${STARLINE_API_URL}/json/v2/user/${userId}/user_info`,
+        `${STARLINE_API_URL}/json/v2/user/list`,
         {
             headers: { 
-                'Cookie': `slnet=${slnetData.slnet}`,
+                'Authorization': `Bearer ${userToken}`,
                 'Content-Type': 'application/json'
             }
         },
@@ -307,10 +290,10 @@ async function fetchEvents(login, password, dateFrom, useProxy) {
     
     if (devicesData.code != 200) throw new Error('Ошибка получения устройств: ' + JSON.stringify(devicesData));
     
-    const deviceId = devicesData.devices?.[0]?.device_id;
+    const deviceId = devicesData.devices?.[0]?.device_id || devicesData.answer?.devices?.[0]?.device_id;
     if (!deviceId) throw new Error('Не найдено ни одного устройства. Ответ: ' + JSON.stringify(devicesData));
 
-    // 6. Получаем историю событий
+    // 5. Получаем историю событий
     const startTime = Math.floor(dateFrom.getTime() / 1000);
     const endTime = Math.floor(Date.now() / 1000);
     
@@ -320,7 +303,7 @@ async function fetchEvents(login, password, dateFrom, useProxy) {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'Cookie': `slnet=${slnetData.slnet}`
+                'Authorization': `Bearer ${userToken}`
             },
             body: JSON.stringify({ from: startTime, to: endTime })
         },
@@ -328,9 +311,8 @@ async function fetchEvents(login, password, dateFrom, useProxy) {
     );
     const eventsData = await eventsRes.json();
     
-    return eventsData.events || [];
+    return eventsData.events || eventsData.answer?.events || [];
 }
-
 // ===== Подсчёт моточасов =====
 function calculateEngineHours(rawEvents) {
     if (!rawEvents || rawEvents.length < 2) {
