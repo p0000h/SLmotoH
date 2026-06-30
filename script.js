@@ -302,7 +302,6 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     
     if (slnetData.code != 200) throw new Error('Ошибка auth.slid: ' + JSON.stringify(slnetData));
     
-    // Получаем slnet токен из X-Set-Cookie
     const setCookieHeader = slnetRes.headers.get('X-Set-Cookie');
     let slnetToken = null;
     if (setCookieHeader) {
@@ -313,9 +312,9 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     
     const userId = slnetData.user_id;
     if (!userId) throw new Error('Не получен user_id: ' + JSON.stringify(slnetData));
-    if (!slnetToken) throw new Error('Не получен slnet токен из auth.slid');
+    if (!slnetToken) throw new Error('Не получен slnet токен');
 
-    // 5. Получаем список устройств — отправляем Cookie через X-Cookie
+    // 5. Получаем список устройств
     const devicesRes = await fetchWithProxy(
         `${STARLINE_API_URL}/json/v2/user/${userId}/user_info`,
         {
@@ -349,43 +348,39 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     );
     const eventsData = await eventsRes.json();
     
+    // Сохраняем отладочную информацию
+    window.debugInfo = {
+        deviceId,
+        userId,
+        startTime,
+        endTime,
+        totalEvents: eventsData.events?.length || 0,
+        firstEvents: eventsData.events?.slice(0, 5) || [],
+        rawResponse: eventsData
+    };
+    
     return eventsData.events || [];
 }
+
 // ===== Подсчёт моточасов =====
 function calculateEngineHours(rawEvents) {
-    if (!rawEvents || rawEvents.length < 2) {
-        return { totalMs: 0, sessions: [], byDay: [] };
-    }
+    if (!rawEvents || rawEvents.length < 2) return { totalMs: 0, sessions: [], byDay: [] };
 
     const allEvents = rawEvents
-        .map(e => ({
-            eventId: e.event_id || e.type,
-            time: new Date((e.ts || e.time) * 1000)
-        }))
+        .map(e => ({ eventId: e.event_id || e.type, time: new Date((e.ts || e.time) * 1000) }))
         .filter(e => START_COMMANDS.includes(e.eventId) || STOP_COMMANDS.includes(e.eventId))
         .sort((a, b) => a.time - b.time);
 
-    if (allEvents.length < 2) {
-        return { totalMs: 0, sessions: [], byDay: [] };
-    }
-
-    if (STOP_COMMANDS.includes(allEvents[0].eventId)) {
-        allEvents.shift();
-    }
+    if (allEvents.length < 2) return { totalMs: 0, sessions: [], byDay: [] };
+    if (STOP_COMMANDS.includes(allEvents[0].eventId)) allEvents.shift();
 
     const sessions = [];
     let totalMs = 0;
-
     for (let i = 0; i < allEvents.length - 1; i += 2) {
-        if (STOP_COMMANDS.includes(allEvents[i].eventId)) {
-            i -= 1;
-            continue;
-        }
-        
+        if (STOP_COMMANDS.includes(allEvents[i].eventId)) { i -= 1; continue; }
         const start = allEvents[i].time;
         const end = allEvents[i + 1].time;
         const duration = end - start;
-        
         if (duration > 0 && duration < 24 * 60 * 60 * 1000) {
             sessions.push({ start, end, duration });
             totalMs += duration;
@@ -410,7 +405,7 @@ function calculateEngineHours(rawEvents) {
     return { totalMs, sessions, byDay };
 }
 
-// ===== Отображение результатов =====
+// ===== Отображение =====
 function displayResults(result) {
     const totalHours = Math.floor(result.totalMs / (1000 * 60 * 60));
     const totalMinutes = Math.floor((result.totalMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -423,13 +418,37 @@ function displayResults(result) {
     const dailyEl = document.getElementById('dailyResults');
     dailyEl.innerHTML = '';
 
+    // ОТЛАДКА: показываем, что пришло от API
+    if (window.debugInfo) {
+        const debugCard = document.createElement('div');
+        debugCard.className = 'day-card';
+        debugCard.style.background = '#fff3cd';
+        debugCard.style.borderLeft = '4px solid #ffc107';
+        debugCard.innerHTML = `
+            <div class="day-header">
+                <div class="day-date">🔍 Отладка</div>
+                <div class="day-hours">${window.debugInfo.totalEvents} событий</div>
+            </div>
+            <div style="font-size:12px;color:#666;margin-top:8px;">
+                <div><b>Device ID:</b> ${window.debugInfo.deviceId}</div>
+                <div><b>User ID:</b> ${window.debugInfo.userId}</div>
+                <div><b>Период:</b> ${new Date(window.debugInfo.startTime * 1000).toLocaleDateString('ru-RU')} — ${new Date(window.debugInfo.endTime * 1000).toLocaleDateString('ru-RU')}</div>
+                <div style="margin-top:8px;"><b>Первые 5 событий:</b></div>
+                <pre style="background:#fff;padding:8px;border-radius:4px;overflow-x:auto;font-size:10px;margin-top:4px;">${JSON.stringify(window.debugInfo.firstEvents, null, 2)}</pre>
+            </div>
+        `;
+        dailyEl.appendChild(debugCard);
+    }
+
     if (result.byDay.length === 0) {
-        dailyEl.innerHTML = '<p style="text-align:center;color:#888;padding:20px;">Событий запуска/остановки не найдено за выбранный период</p>';
+        const noData = document.createElement('p');
+        noData.style.cssText = 'text-align:center;color:#888;padding:20px;';
+        noData.textContent = 'Событий запуска/остановки не найдено. Посмотри блок "Отладка" выше — там видно, какие события пришли от API.';
+        dailyEl.appendChild(noData);
     } else {
         for (const day of result.byDay) {
             const dayHours = Math.floor(day.totalMs / (1000 * 60 * 60));
             const dayMinutes = Math.floor((day.totalMs % (1000 * 60 * 60)) / (1000 * 60));
-
             const card = document.createElement('div');
             card.className = 'day-card';
             card.innerHTML = `
@@ -447,8 +466,23 @@ function displayResults(result) {
             dailyEl.appendChild(card);
         }
     }
-
     resultsEl.classList.remove('hidden');
+}
+
+function formatDate(d) {
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric', weekday: 'short' });
+}
+function formatTime(d) { return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); }
+function formatDuration(ms) {
+    const h = Math.floor(ms / (1000 * 60 * 60));
+    const m = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    return `${h}ч ${m}м`;
+}
+function showError(msg) {
+    if (msg === 'CAPTCHA_REQUIRED') return;
+    errorEl.textContent = msg;
+    errorEl.classList.remove('hidden');
+}    resultsEl.classList.remove('hidden');
 }
 
 function formatDate(d) {
