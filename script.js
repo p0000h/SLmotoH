@@ -2,6 +2,10 @@
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
 
+// 🔐 ТВОИ КЛЮЧИ — ВСТАВЬ СЮДА
+const APP_ID = 'ТВОЙ_APP_ID_СЮДА'; // например, '123456'
+const APP_SECRET = 'ТВОЙ_SECRET_СЮДА'; // например, 'abc123def456...'
+
 // ID событий запуска/остановки двигателя
 const START_COMMANDS = [1037, 20532, 601];
 const STOP_COMMANDS = [1042, 602];
@@ -32,7 +36,6 @@ window.addEventListener('load', () => {
         try {
             const creds = JSON.parse(saved);
             document.getElementById('login').value = creds.login || '';
-            document.getElementById('appId').value = creds.appId || '';
             document.getElementById('dateFrom').value = creds.dateFrom || dateInput.value;
             document.getElementById('useProxy').checked = creds.useProxy !== false;
         } catch (e) {}
@@ -45,13 +48,11 @@ form.addEventListener('submit', async (e) => {
     
     const login = document.getElementById('login').value.trim();
     const password = document.getElementById('password').value;
-    const appId = document.getElementById('appId').value.trim();
-    const appSecret = document.getElementById('appSecret').value.trim();
     const dateFrom = new Date(document.getElementById('dateFrom').value);
     const useProxy = document.getElementById('useProxy').checked;
 
     localStorage.setItem('starline_creds', JSON.stringify({
-        login, appId, dateFrom: document.getElementById('dateFrom').value, useProxy
+        login, dateFrom: document.getElementById('dateFrom').value, useProxy
     }));
 
     submitBtn.disabled = true;
@@ -60,7 +61,7 @@ form.addEventListener('submit', async (e) => {
     resultsEl.classList.add('hidden');
 
     try {
-        const events = await fetchEvents(login, password, appId, appSecret, dateFrom, useProxy);
+        const events = await fetchEvents(login, password, dateFrom, useProxy);
         const result = calculateEngineHours(events);
         displayResults(result);
     } catch (err) {
@@ -80,7 +81,7 @@ async function sha1(str) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ===== MD5 полифилл (исправленный) =====
+// ===== MD5 полифилл =====
 function md5(string) {
     function md5cycle(x, k) {
         var a = x[0], b = x[1], c = x[2], d = x[3];
@@ -198,7 +199,7 @@ function md5(string) {
         return (a + b) & 0xFFFFFFFF;
     }
     function hex(arr) {
-        var hex_chr = '0123456789abcdef'; // ИСПРАВЛЕНО: строка, не массив!
+        var hex_chr = '0123456789abcdef';
         var str = '';
         for (var j = 0; j < 4; j++)
             for (var i = 0; i < 4; i++)
@@ -233,11 +234,11 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 }
 
 // ===== Авторизация в StarLine Open API =====
-async function fetchEvents(login, password, appId, appSecret, dateFrom, useProxy) {
+async function fetchEvents(login, password, dateFrom, useProxy) {
     // 1. Получаем код приложения
-    const secretMd5 = md5(appSecret);
+    const secretMd5 = md5(APP_SECRET);
     const codeRes = await fetchWithProxy(
-        `${STARLINE_ID_URL}/application/getCode?appId=${appId}&secret=${secretMd5}`,
+        `${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`,
         {},
         useProxy
     );
@@ -246,9 +247,9 @@ async function fetchEvents(login, password, appId, appSecret, dateFrom, useProxy
     const appCode = codeData.desc.code;
 
     // 2. Получаем токен приложения
-    const secretCodeMd5 = md5(appSecret + appCode);
+    const secretCodeMd5 = md5(APP_SECRET + appCode);
     const tokenRes = await fetchWithProxy(
-        `${STARLINE_ID_URL}/application/getToken?appId=${appId}&secret=${secretCodeMd5}`,
+        `${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`,
         {},
         useProxy
     );
