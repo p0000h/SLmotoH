@@ -15,7 +15,7 @@ const STOP_COMMANDS = [1042, 602];
 
 // CORS-прокси
 const CORS_PROXIES = [
-    'https://wandering-mode-2cec.nikitinsv.workers.dev',
+    'https://wandering-mode-2cec.nikitinsv.workers.dev/?url=',
 
 ];
 
