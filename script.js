@@ -15,8 +15,8 @@ const STOP_COMMANDS = [1042, 602];
 
 // CORS-прокси
 const CORS_PROXIES = [
-    'https://corsproxy.io/?',
-    'https://api.allorigins.win/raw?url=',
+    'https://wandering-mode-2cec.nikitinsv.workers.dev',
+
 ];
 
 // ===== DOM элементы =====
