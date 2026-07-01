@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 33');
+alert('🔢 Версия скрипта: 34');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -335,10 +335,10 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    const OLD_API = 'https://starline-online.ru';
+    const ID_URL = 'https://id.starline.ru/apiV3';
+    const API_URL = 'https://developer.starline.ru';
     const PROXY = CORS_PROXIES[0];
 
-    // Универсальная функция: все ответы приходят обёрнутыми в {_proxy_cookie, _proxy_body}
     async function proxyFetch(url, options = {}) {
         const proxyUrl = PROXY + encodeURIComponent(url);
         const res = await fetch(proxyUrl, {
@@ -351,82 +351,102 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
             cookie: wrapper._proxy_cookie || '',
             status: wrapper._proxy_status || 0,
             body: wrapper._proxy_body || '',
-            json: () => JSON.parse(wrapper._proxy_body || '{}'),
+            json: () => { try { return JSON.parse(wrapper._proxy_body || '{}'); } catch(e) { return {}; } },
             text: () => wrapper._proxy_body || ''
         };
     }
 
-    // 1. Авторизация
-    alert('🔍 1/4: Авторизация');
-    let body = `username=${encodeURIComponent(login)}&password=${encodeURIComponent(password)}`;
-    if (captchaSid && captchaCode) {
-        body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
-    }
+    // 1. getCode
+    alert('🔍 1/6: getCode');
+    const secretMd5 = md5(APP_SECRET);
+    const codeRes = await proxyFetch(`${ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`);
+    const codeData = codeRes.json();
+    if (codeData.state !== 1) throw new Error('getCode: ' + codeRes.body.substring(0, 200));
+    const appCode = codeData.desc.code;
 
-    const loginRes = await proxyFetch(`${OLD_API}/rest/security/login`, {
+    // 2. getToken
+    alert('🔍 2/6: getToken');
+    const secretCodeMd5 = md5(APP_SECRET + appCode);
+    const tokenRes = await proxyFetch(`${ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`);
+    const tokenData = tokenRes.json();
+    if (tokenData.state !== 1) throw new Error('getToken: ' + tokenRes.body.substring(0, 200));
+    const appToken = tokenData.desc.token;
+
+    // 3. user/login
+    alert('🔍 3/6: user/login');
+    const passwordSha1 = await sha1(password);
+    let loginBody = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
+    if (captchaSid && captchaCode) {
+        loginBody += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
+    }
+    const userLoginRes = await proxyFetch(`${ID_URL}/user/login?token=${appToken}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
+        body: loginBody
     });
+    const userLoginData = userLoginRes.json();
 
-    alert('Ответ login (status=' + loginRes.status + '):\n' + loginRes.body.substring(0, 300));
-    alert('Cookie из прокси: "' + loginRes.cookie + '"');
-
-    // Проверяем капчу
-    try {
-        const loginData = JSON.parse(loginRes.body);
-        if (loginData?.desc?.message?.includes('Captcha')) {
-            pendingLoginData = { login, password, dateFrom, useProxy };
-            currentCaptchaSid = loginData.desc.captchaSid;
-            if (captchaImg) captchaImg.src = loginData.desc.captchaImg;
-            if (captchaCodeInput) captchaCodeInput.value = '';
-            if (captchaBlock) captchaBlock.classList.remove('hidden');
-            throw new Error('CAPTCHA_REQUIRED');
-        }
-    } catch (e) {
-        if (e.message === 'CAPTCHA_REQUIRED') throw e;
+    if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
+        pendingLoginData = { login, password, dateFrom, useProxy };
+        currentCaptchaSid = userLoginData.desc.captchaSid;
+        if (captchaImg) captchaImg.src = userLoginData.desc.captchaImg;
+        if (captchaCodeInput) captchaCodeInput.value = '';
+        if (captchaBlock) captchaBlock.classList.remove('hidden');
+        throw new Error('CAPTCHA_REQUIRED');
     }
+    if (userLoginData.state !== 1) throw new Error('login: ' + userLoginRes.body.substring(0, 200));
+    const userToken = userLoginData.desc.user_token;
 
-    const sessionCookie = loginRes.cookie;
-    if (!sessionCookie) {
-        throw new Error('Не получен session cookie. Ответ: ' + loginRes.body.substring(0, 200));
+    // 4. auth.slid
+    alert('🔍 4/6: auth.slid');
+    const slnetRes = await proxyFetch(`${API_URL}/json/v2/auth.slid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slid_token: userToken })
+    });
+    const slnetData = slnetRes.json();
+    if (slnetData.code != 200) throw new Error('auth.slid: ' + slnetRes.body.substring(0, 200));
+
+    // Получаем slnet из cookie в теле ответа
+    let slnetToken = slnetData.slnet || '';
+    if (!slnetToken && slnetRes.cookie) {
+        const m = slnetRes.cookie.match(/slnet=([^;]+)/);
+        if (m) slnetToken = m[1];
     }
+    const userId = slnetData.user_id;
+    if (!userId || !slnetToken) throw new Error('Нет user_id или slnet. Cookie: ' + slnetRes.cookie);
 
-    // 2. Сохраняем cookie в Worker
-    alert('🔍 2/4: Сохранение cookie');
-    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(sessionCookie);
-    const saveRes = await fetch(saveUrl);
-    const saveData = await saveRes.json();
-    alert('Сохранено: ' + JSON.stringify(saveData));
+    // Сохраняем slnet в Worker
+    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent('slnet=' + slnetToken);
+    await fetch(saveUrl);
 
-    // 3. Получаем device_id
-    alert('🔍 3/4: Device ID');
-    const deviceRes = await proxyFetch(`${OLD_API}/device`);
-    alert('Ответ device: ' + deviceRes.body.substring(0, 300));
-
-    const deviceData = deviceRes.json();
-    const deviceId = deviceData?.answer?.devices?.[0]?.device_id;
-    if (!deviceId) throw new Error('Не найдено устройство: ' + deviceRes.body.substring(0, 200));
+    // 5. user_info
+    alert('🔍 5/6: user_info');
+    const devicesRes = await proxyFetch(`${API_URL}/json/v2/user/${userId}/user_info`);
+    const devicesData = devicesRes.json();
+    if (devicesData.code != 200) throw new Error('user_info: ' + devicesRes.body.substring(0, 200));
+    const deviceId = devicesData.devices?.[0]?.device_id;
+    if (!deviceId) throw new Error('Нет устройств: ' + devicesRes.body.substring(0, 200));
     alert('Device ID: ' + deviceId);
 
-    // 4. События
-    alert('🔍 4/4: События');
+    // 6. events — GET с параметрами в URL
+    alert('🔍 6/6: events');
     const startTime = Math.floor(dateFrom.getTime() / 1000);
     const endTime = Math.floor(Date.now() / 1000);
-    const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
+    const eventsUrl = `${API_URL}/json/v2/device/${deviceId}/events?start=${startTime}&end=${endTime}&limit=1000`;
+    alert('URL: ' + eventsUrl.substring(0, 150));
 
     const eventsRes = await proxyFetch(eventsUrl);
-    alert('Ответ events: ' + eventsRes.body.substring(0, 500));
+    alert('Ответ events (status=' + eventsRes.status + '):\n' + eventsRes.body.substring(0, 800));
 
     const eventsData = eventsRes.json();
-    const events = eventsData?.answer?.events || eventsData?.events || [];
+    const events = eventsData.events || eventsData.answer?.events || [];
 
     alert('Всего событий: ' + events.length);
 
-    window.debugInfo = { deviceId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
+    window.debugInfo = { deviceId, userId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
     return events;
 }
-
 // ===== ПОДСЧЁТ =====
 function calculateEngineHours(rawEvents) {
     if (!rawEvents || rawEvents.length < 2) return { totalMs: 0, sessions: [], byDay: [] };
