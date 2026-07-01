@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 24');
+alert('🔢 Версия скрипта: 25');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -461,11 +461,12 @@ const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${dev
 }, useProxy);
 const eventsData = await eventsRes.json();
 
+// ПОЛНАЯ ДИАГНОСТИКА
 alert(
-    '🔍 Ответ events:\n\n' +
-    'Всего событий: ' + (eventsData.events?.length || 0) + '\n\n' +
-    'Первые 10 событий:\n' + 
-    JSON.stringify(eventsData.events?.slice(0, 10) || [], null, 2)
+    '🔍 ПОЛНЫЙ ОТВЕТ API events:\n\n' +
+    'Код ответа: ' + eventsData.code + '\n' +
+    'Сообщение: ' + (eventsData.message || 'нет') + '\n\n' +
+    'Весь JSON:\n' + JSON.stringify(eventsData, null, 2).substring(0, 1500)
 );
 
 window.debugInfo = {
@@ -474,7 +475,8 @@ window.debugInfo = {
     firstEvents: eventsData.events?.slice(0, 10) || [],
     raw: eventsData
 };
-    return eventsData.events || [];
+
+return eventsData.events || [];
 }
 
 // ===== ПОДСЧЁТ =====
