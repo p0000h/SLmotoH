@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 26');
+alert('🔢 Версия скрипта: 27');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -465,18 +465,17 @@ const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${dev
 }, useProxy);
 const eventsData = await eventsRes.json();
 
+// ПОЛНАЯ ДИАГНОСТИКА
 alert(
-    '🔍 Ответ events:\n\n' +
+    '🔍 ПОЛНЫЙ ОТВЕТ API:\n\n' +
     'Код: ' + eventsData.code + '\n' +
-    'Всего событий: ' + (eventsData.events?.length || 0) + '\n\n' +
-    'Первые 10:\n' + 
-    JSON.stringify(eventsData.events?.slice(0, 10) || eventsData.answer?.events?.slice(0, 10) || [], null, 2).substring(0, 1500)
+    'Сообщение: ' + (eventsData.message || eventsData.codestring || 'нет') + '\n\n' +
+    'Весь JSON (первые 2000 символов):\n' + 
+    JSON.stringify(eventsData, null, 2).substring(0, 2000)
 );
 
 window.debugInfo = {
     deviceId, userId,
-    totalEvents: eventsData.events?.length || 0,
-    firstEvents: eventsData.events?.slice(0, 10) || [],
     raw: eventsData
 };
 
