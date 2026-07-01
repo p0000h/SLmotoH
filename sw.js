@@ -1,44 +1,28 @@
-const CACHE_NAME = 'starline-pwa-v17'; // ← ВАЖНО: новая версия!
-const urlsToCache = [
-    './',
-    './index.html',
-    './styles.css',
-    './script.js',
-    './manifest.json'
-];
+const CACHE_NAME = 'starline-pwa-v21';
 
 self.addEventListener('install', event => {
-    event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then(cache => cache.addAll(urlsToCache))
-            .then(() => self.skipWaiting())
-    );
+    self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
     event.waitUntil(
-        caches.keys().then(keys =>
-            Promise.all(
-                keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-            )
+        caches.keys().then(keys => 
+            Promise.all(keys.map(key => caches.delete(key)))
         ).then(() => self.clients.claim())
     );
 });
 
 self.addEventListener('fetch', event => {
-    if (event.request.url.includes('workers.dev') || 
-        event.request.url.includes('starline') ||
-        event.request.url.includes('corsproxy')) {
+    // НЕ кэшируем script.js — всегда берём свежую версию
+    if (event.request.url.includes('script.js')) {
+        event.respondWith(fetch(event.request));
         return;
     }
     
+    // Остальные файлы кэшируем
     event.respondWith(
-        fetch(event.request)
-            .then(res => {
-                const clone = res.clone();
-                caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-                return res;
-            })
-            .catch(() => caches.match(event.request))
+        caches.match(event.request).then(response => {
+            return response || fetch(event.request);
+        })
     );
 });
