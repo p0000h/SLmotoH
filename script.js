@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 22');
+alert('🔢 Версия скрипта: 23');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -403,22 +403,42 @@ alert(
     if (userLoginData.state !== 1) throw new Error('login: ' + JSON.stringify(userLoginData));
     const userToken = userLoginData.desc.user_token;
 
-    alert('🔍 4/6: auth.slid');
-    const slnetRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/auth.slid`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slid_token: userToken })
-    }, useProxy);
-    const slnetData = await slnetRes.json();
-    if (slnetData.code != 200) throw new Error('auth.slid: ' + JSON.stringify(slnetData));
+alert('🔍 4/6: auth.slid');
+alert('Отправляем slid_token: ' + userToken.substring(0, 20) + '...');
 
-    const setCookie = slnetRes.headers.get('X-Set-Cookie');
-    let slnetToken = slnetData.slnet;
-    if (!slnetToken && setCookie) {
-        const m = setCookie.match(/slnet=([^;]+)/);
-        if (m) slnetToken = m[1];
-    }
-    const userId = slnetData.user_id;
-    if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
+// Добавляем таймаут 10 секунд
+const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('Таймаут 10 секунд')), 10000)
+);
+
+const authPromise = fetchWithProxy(`${STARLINE_API_URL}/json/v2/auth.slid`, {
+    method: 'POST', 
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slid_token: userToken })
+}, useProxy);
+
+const slnetRes = await Promise.race([authPromise, timeoutPromise]);
+const slnetData = await slnetRes.json();
+
+alert(
+    '🔍 Ответ auth.slid:\n\n' +
+    'Code: ' + slnetData.code + '\n' +
+    'User ID: ' + (slnetData.user_id || 'нет') + '\n' +
+    'SLNET: ' + (slnetData.slnet ? 'получен' : 'НЕТ') + '\n' +
+    'X-Set-Cookie: ' + (slnetRes.headers.get('X-Set-Cookie') ? 'есть' : 'НЕТ') + '\n\n' +
+    'Полный ответ:\n' + JSON.stringify(slnetData, null, 2)
+);
+
+if (slnetData.code != 200) throw new Error('auth.slid: ' + JSON.stringify(slnetData));
+
+const setCookie = slnetRes.headers.get('X-Set-Cookie');
+let slnetToken = slnetData.slnet;
+if (!slnetToken && setCookie) {
+    const m = setCookie.match(/slnet=([^;]+)/);
+    if (m) slnetToken = m[1];
+}
+const userId = slnetData.user_id;
+if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
 
     alert('🔍 5/6: user_info');
     const devicesRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/user/${userId}/user_info`, {
