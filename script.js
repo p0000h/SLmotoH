@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 31');
+alert('🔢 Версия скрипта: 32');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -336,23 +336,35 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
     const OLD_API = 'https://starline-online.ru';
-    
+    const PROXY = CORS_PROXIES[0];
+
+    // Вспомогательная функция: простой GET/POST через прокси БЕЗ cookie в заголовках
+    async function proxyFetch(url, options = {}) {
+        const proxyUrl = PROXY + encodeURIComponent(url);
+        const res = await fetch(proxyUrl, {
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            body: options.body || undefined
+        });
+        return res;
+    }
+
     // 1. Авторизация
-    alert('🔍 1/3: Авторизация');
+    alert('🔍 1/4: Авторизация');
     let body = `username=${encodeURIComponent(login)}&password=${encodeURIComponent(password)}`;
     if (captchaSid && captchaCode) {
         body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
     }
-    
-    const loginRes = await fetchWithProxy(`${OLD_API}/rest/security/login`, {
+
+    const loginRes = await proxyFetch(`${OLD_API}/rest/security/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body
-    }, useProxy);
-    
+    });
+
     const loginText = await loginRes.text();
     alert('Ответ login: ' + loginText.substring(0, 300));
-    
+
     // Проверяем капчу
     try {
         const loginData = JSON.parse(loginText);
@@ -367,75 +379,64 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     } catch (e) {
         if (e.message === 'CAPTCHA_REQUIRED') throw e;
     }
-    
-    // Получаем и ОЧИЩАЕМ cookies
+
+    // Получаем cookie из ответа
     const rawCookie = loginRes.headers.get('X-Set-Cookie') || loginRes.headers.get('Set-Cookie') || '';
-    // Берём только первое cookie, убираем переносы строк и лишние пробелы
     let sessionCookie = rawCookie.split('\n')[0].split(',')[0].trim();
-    // Убираем атрибуты cookie (Path=, Domain=, HttpOnly и т.д.) — оставляем только key=value
     if (sessionCookie.includes(';')) {
         sessionCookie = sessionCookie.split(';')[0].trim();
     }
-    
-    alert('Cookie (очищенный): "' + sessionCookie + '"');
-    
+    alert('Cookie: "' + sessionCookie.substring(0, 50) + '..."');
+
     if (!sessionCookie) {
-        throw new Error('Не получен session cookie от starline-online.ru');
+        throw new Error('Не получен session cookie');
     }
-    
-    // 2. Получаем device_id
-    alert('🔍 2/3: Получение device_id');
-    const deviceRes = await fetchWithProxy(`${OLD_API}/device`, {
-        headers: { 
-            'X-Cookie': sessionCookie,
-            'Accept-Language': 'ru-RU,ru;q=0.9'
-        }
-    }, useProxy);
+
+    // 2. Сохраняем cookie в Worker (отдельный запрос, без проблемных заголовков)
+    alert('🔍 2/4: Сохранение cookie в прокси');
+    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(sessionCookie);
+    await fetch(saveUrl);
+    alert('Cookie сохранён в прокси');
+
+    // 3. Получаем device_id (cookie подставится автоматически из Worker)
+    alert('🔍 3/4: Получение device_id');
+    const deviceRes = await proxyFetch(`${OLD_API}/device`);
     const deviceData = await deviceRes.json();
-    
-    alert('Ответ device: ' + JSON.stringify(deviceData).substring(0, 500));
-    
+
+    alert('Ответ device: ' + JSON.stringify(deviceData).substring(0, 300));
+
     const deviceId = deviceData?.answer?.devices?.[0]?.device_id;
     if (!deviceId) throw new Error('Не найдено устройство: ' + JSON.stringify(deviceData));
     alert('Device ID: ' + deviceId);
-    
-    // 3. Получаем историю событий через старое API (GET с параметрами в URL)
-alert('🔍 3/3: События');
-const startTime = Math.floor(dateFrom.getTime() / 1000);
-const endTime = Math.floor(Date.now() / 1000);
 
-// Передаём cookie через параметр URL (_ck), а НЕ через заголовок
-const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
+    // 4. Получаем события (cookie подставится автоматически из Worker)
+    alert('🔍 4/4: События');
+    const startTime = Math.floor(dateFrom.getTime() / 1000);
+    const endTime = Math.floor(Date.now() / 1000);
 
-// Кодируем cookie для безопасной передачи в URL
-const encodedCookie = encodeURIComponent(sessionCookie);
-const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(eventsUrl) + '&_ck=' + encodedCookie;
+    const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
+    alert('URL: ' + eventsUrl);
 
-alert('Запрос событий...');
+    const eventsRes = await proxyFetch(eventsUrl);
+    const eventsData = await eventsRes.json();
 
-const eventsRes = await fetch(proxyUrl, {
-    method: 'GET',
-    headers: { 'Accept-Language': 'ru-RU,ru;q=0.9' }
-});
-const eventsData = await eventsRes.json();
+    const events = eventsData?.answer?.events || eventsData?.events || [];
 
-const events = eventsData?.answer?.events || eventsData?.events || [];
+    alert(
+        '🔍 Ответ events:\n\n' +
+        'Всего событий: ' + events.length + '\n\n' +
+        'Первые 10:\n' +
+        JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
+    );
 
-alert(
-    '🔍 Ответ events:\n\n' +
-    'Всего событий: ' + events.length + '\n\n' +
-    'Первые 10:\n' +
-    JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
-);
+    window.debugInfo = {
+        deviceId,
+        totalEvents: events.length,
+        firstEvents: events.slice(0, 10),
+        raw: eventsData
+    };
 
-window.debugInfo = {
-    deviceId,
-    totalEvents: events.length,
-    firstEvents: events.slice(0, 10),
-    raw: eventsData
-};
-
-return events;
+    return events;
 }
 
 // ===== ПОДСЧЁТ =====
