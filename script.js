@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 23');
+alert('🔢 Версия скрипта: 24');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -449,22 +449,31 @@ if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
     const deviceId = devicesData.devices?.[0]?.device_id;
     if (!deviceId) throw new Error('Нет устройств');
 
-    alert('🔍 6/6: events');
-    const startTime = Math.floor(dateFrom.getTime() / 1000);
-    const endTime = Math.floor(Date.now() / 1000);
-    const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${deviceId}/events`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Cookie': `slnet=${slnetToken}` },
-        body: JSON.stringify({ from: startTime, to: endTime })
-    }, useProxy);
-    const eventsData = await eventsRes.json();
+alert('🔍 6/6: events (deviceId=' + deviceId + ')');
+const startTime = Math.floor(dateFrom.getTime() / 1000);
+const endTime = Math.floor(Date.now() / 1000);
+alert('Период: ' + new Date(startTime * 1000).toLocaleDateString('ru-RU') + ' — ' + new Date(endTime * 1000).toLocaleDateString('ru-RU'));
 
-    window.debugInfo = {
-        deviceId, userId,
-        totalEvents: eventsData.events?.length || 0,
-        firstEvents: eventsData.events?.slice(0, 5) || []
-    };
-    
+const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${deviceId}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Cookie': `slnet=${slnetToken}` },
+    body: JSON.stringify({ from: startTime, to: endTime })
+}, useProxy);
+const eventsData = await eventsRes.json();
+
+alert(
+    '🔍 Ответ events:\n\n' +
+    'Всего событий: ' + (eventsData.events?.length || 0) + '\n\n' +
+    'Первые 10 событий:\n' + 
+    JSON.stringify(eventsData.events?.slice(0, 10) || [], null, 2)
+);
+
+window.debugInfo = {
+    deviceId, userId,
+    totalEvents: eventsData.events?.length || 0,
+    firstEvents: eventsData.events?.slice(0, 10) || [],
+    raw: eventsData
+};
     return eventsData.events || [];
 }
 
