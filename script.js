@@ -8,7 +8,7 @@ const APP_SECRET = 'JfZ5bOVZHUbGTCj6PDxvYX75oD5MiwRP';
 
 // URL твоего Cloudflare Worker (обязательно заканчивается на /?url=)
 const CORS_PROXIES = [
-    'https://wandering-mode-2cec.nikitinsv.workers.dev/?url=' 
+    'https://wandering-mode-2cec.nikitinsv.workers.dev/?url='; 
 ];
 
 // ID событий двигателя (из твоего Android-проекта)
