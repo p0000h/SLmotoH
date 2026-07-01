@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 29');
+alert('🔢 Версия скрипта: 30');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -337,8 +337,8 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
     const OLD_API = 'https://starline-online.ru';
     
-    // 1. Авторизация через старое API (как в Android-приложении)
-    alert('🔍 1/3: Авторизация (starline-online.ru)');
+    // 1. Авторизация
+    alert('🔍 1/3: Авторизация');
     let body = `username=${encodeURIComponent(login)}&password=${encodeURIComponent(password)}`;
     if (captchaSid && captchaCode) {
         body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
@@ -351,7 +351,7 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     }, useProxy);
     
     const loginText = await loginRes.text();
-    alert('Ответ login: ' + loginText.substring(0, 500));
+    alert('Ответ login: ' + loginText.substring(0, 300));
     
     // Проверяем капчу
     try {
@@ -368,15 +368,22 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         if (e.message === 'CAPTCHA_REQUIRED') throw e;
     }
     
-    // Получаем cookies из ответа прокси
-    const setCookieHeader = loginRes.headers.get('X-Set-Cookie') || loginRes.headers.get('Set-Cookie');
-    let sessionCookie = '';
-    if (setCookieHeader) {
-        sessionCookie = setCookieHeader;
+    // Получаем и ОЧИЩАЕМ cookies
+    const rawCookie = loginRes.headers.get('X-Set-Cookie') || loginRes.headers.get('Set-Cookie') || '';
+    // Берём только первое cookie, убираем переносы строк и лишние пробелы
+    let sessionCookie = rawCookie.split('\n')[0].split(',')[0].trim();
+    // Убираем атрибуты cookie (Path=, Domain=, HttpOnly и т.д.) — оставляем только key=value
+    if (sessionCookie.includes(';')) {
+        sessionCookie = sessionCookie.split(';')[0].trim();
     }
-    alert('Session cookie: ' + (sessionCookie ? 'получен (' + sessionCookie.length + ' симв.)' : 'НЕТ'));
     
-    // 2. Получаем device_id через старое API
+    alert('Cookie (очищенный): "' + sessionCookie + '"');
+    
+    if (!sessionCookie) {
+        throw new Error('Не получен session cookie от starline-online.ru');
+    }
+    
+    // 2. Получаем device_id
     alert('🔍 2/3: Получение device_id');
     const deviceRes = await fetchWithProxy(`${OLD_API}/device`, {
         headers: { 
