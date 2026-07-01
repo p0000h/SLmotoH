@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 34');
+alert('🔢 Версия скрипта: 35');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -430,22 +430,64 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     alert('Device ID: ' + deviceId);
 
     // 6. events — GET с параметрами в URL
-    alert('🔍 6/6: events');
-    const startTime = Math.floor(dateFrom.getTime() / 1000);
-    const endTime = Math.floor(Date.now() / 1000);
-    const eventsUrl = `${API_URL}/json/v2/device/${deviceId}/events?start=${startTime}&end=${endTime}&limit=1000`;
-    alert('URL: ' + eventsUrl.substring(0, 150));
+  alert('🔍 6/6: events');
+const startTime = Math.floor(dateFrom.getTime() / 1000);
+const endTime = Math.floor(Date.now() / 1000);
 
-    const eventsRes = await proxyFetch(eventsUrl);
-    alert('Ответ events (status=' + eventsRes.status + '):\n' + eventsRes.body.substring(0, 800));
+// Пробуем POST с разными форматами body
+const eventsUrl = `${API_URL}/json/v2/device/${deviceId}/events`;
 
-    const eventsData = eventsRes.json();
-    const events = eventsData.events || eventsData.answer?.events || [];
+// Формат 1: {from, to}
+alert('Проба 1: {from, to}');
+let eventsRes = await proxyFetch(eventsUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: startTime, to: endTime })
+});
+let eventsData = eventsRes.json();
+alert('Формат 1 ответ: ' + eventsRes.body.substring(0, 300));
 
-    alert('Всего событий: ' + events.length);
+// Формат 2: {startTime, endTime}
+if (eventsData.code == 500 || eventsData.code == 400) {
+    alert('Проба 2: {startTime, endTime}');
+    eventsRes = await proxyFetch(eventsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startTime: startTime, endTime: endTime })
+    });
+    eventsData = eventsRes.json();
+    alert('Формат 2 ответ: ' + eventsRes.body.substring(0, 300));
+}
 
-    window.debugInfo = { deviceId, userId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
-    return events;
+// Формат 3: {start_time, end_time}
+if (eventsData.code == 500 || eventsData.code == 400) {
+    alert('Проба 3: {start_time, end_time}');
+    eventsRes = await proxyFetch(eventsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_time: startTime, end_time: endTime })
+    });
+    eventsData = eventsRes.json();
+    alert('Формат 3 ответ: ' + eventsRes.body.substring(0, 300));
+}
+
+// Формат 4: {start, end} (без limit)
+if (eventsData.code == 500 || eventsData.code == 400) {
+    alert('Проба 4: {start, end} без limit');
+    eventsRes = await proxyFetch(eventsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start: startTime, end: endTime })
+    });
+    eventsData = eventsRes.json();
+    alert('Формат 4 ответ: ' + eventsRes.body.substring(0, 300));
+}
+
+const events = eventsData.events || eventsData.answer?.events || [];
+alert('Всего событий: ' + events.length + '\nКод: ' + eventsData.code);
+
+window.debugInfo = { deviceId, userId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
+return events;
 }
 // ===== ПОДСЧЁТ =====
 function calculateEngineHours(rawEvents) {
