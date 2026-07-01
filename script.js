@@ -227,13 +227,38 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    alert('🔍 1/6: getCode');
+    // ===== ДИАГНОСТИКА =====
     const secretMd5 = md5(APP_SECRET);
+    
+    // Проверка MD5 на известной строке
+    const testMd5 = md5('test');
+    const expectedTestMd5 = '098f6bcd4621d373cade4e832627b4f6'; // MD5 от 'test'
+    
+    alert(
+        '🔍 ДИАГНОСТИКА\n\n' +
+        'APP_ID: ' + APP_ID + '\n' +
+        'APP_SECRET: ' + APP_SECRET.substring(0, 10) + '... (длина: ' + APP_SECRET.length + ')\n' +
+        'MD5 от SECRET: ' + secretMd5 + '\n\n' +
+        'Проверка MD5:\n' +
+        'MD5("test") = ' + testMd5 + '\n' +
+        'Ожидалось:   ' + expectedTestMd5 + '\n' +
+        'Совпадает: ' + (testMd5 === expectedTestMd5 ? '✅ ДА' : '❌ НЕТ')
+    );
+    
+    if (testMd5 !== expectedTestMd5) {
+        throw new Error('MD5 работает неправильно! Тест не прошёл.');
+    }
+    // ===== КОНЕЦ ДИАГНОСТИКИ =====
+    
+    alert('🔍 1/6: getCode');
     const codeRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`, {}, useProxy);
     const codeData = await codeRes.json();
+    
+    alert('Ответ getCode:\n' + JSON.stringify(codeData, null, 2));
+    
     if (codeData.state !== 1) throw new Error('getCode: ' + JSON.stringify(codeData));
     const appCode = codeData.desc.code;
-
+    
     alert('🔍 2/6: getToken');
     const secretCodeMd5 = md5(APP_SECRET + appCode);
     const tokenRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`, {}, useProxy);
