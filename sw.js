@@ -1,4 +1,4 @@
-const CACHE_NAME = 'starline-pwa-v1';
+const CACHE_NAME = 'starline-pwa-v17'; // ← ВАЖНО: новая версия!
 const urlsToCache = [
     './',
     './index.html',
@@ -25,12 +25,10 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Стратегия: сеть, с фолбэком на кэш
 self.addEventListener('fetch', event => {
-    // API-запросы не кэшируем
-    if (event.request.url.includes('starline-online.ru') || 
-        event.request.url.includes('corsproxy') ||
-        event.request.url.includes('allorigins')) {
+    if (event.request.url.includes('workers.dev') || 
+        event.request.url.includes('starline') ||
+        event.request.url.includes('corsproxy')) {
         return;
     }
     
