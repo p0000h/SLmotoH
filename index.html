@@ -8,14 +8,13 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a73e8">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Моточасы">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>🚗 Моточасы StarLine</h1>
-            <p class="subtitle">Подсчёт моточасов по событиям запуска/остановки двигателя</p>
+            <p class="subtitle">Подсчёт моточасов</p>
         </header>
 
         <form id="loginForm">
@@ -23,30 +22,34 @@
                 <label for="login">Логин StarLine</label>
                 <input type="text" id="login" required placeholder="email@example.com">
             </div>
-            
             <div class="form-group">
                 <label for="password">Пароль</label>
-                <input type="password" id="password" required placeholder="Пароль от аккаунта StarLine">
+                <input type="password" id="password" required>
             </div>
-            
             <div class="form-group">
                 <label for="dateFrom">Дата начала отсчёта</label>
                 <input type="date" id="dateFrom" required>
             </div>
-            
             <div class="form-group checkbox-group">
                 <label>
                     <input type="checkbox" id="useProxy" checked>
                     Использовать CORS-прокси
                 </label>
             </div>
-            
             <button type="submit" id="submitBtn">Посчитать моточасы</button>
         </form>
 
+        <div id="captchaBlock" class="hidden">
+            <h3>🔒 Требуется капча</h3>
+            <img id="captchaImg" src="" alt="Капча" class="captcha-img">
+            <button type="button" id="refreshCaptcha" class="btn-small">🔄 Обновить</button>
+            <input type="text" id="captchaCode" placeholder="Код с картинки">
+            <button type="button" id="submitCaptcha" class="btn-primary">Продолжить</button>
+        </div>
+
         <div id="loading" class="hidden">
             <div class="spinner"></div>
-            <p>Загружаем данные из StarLine...</p>
+            <p>Загружаем данные...</p>
         </div>
 
         <div id="error" class="hidden"></div>
@@ -57,7 +60,6 @@
                 <div class="total-value" id="totalHours">0</div>
                 <div class="total-sub" id="totalMinutes">0 минут</div>
             </div>
-
             <div class="stats-row">
                 <div class="stat-card">
                     <div class="stat-label">Дней с двигателем</div>
@@ -68,21 +70,11 @@
                     <div class="stat-value" id="startsCount">0</div>
                 </div>
             </div>
-
             <h2>По дням</h2>
             <div id="dailyResults"></div>
         </div>
     </div>
 
     <script src="script.js"></script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('✅ Service Worker зарегистрирован'))
-                    .catch(err => console.error('❌ Ошибка SW', err));
-            });
-        }
-    </script>
 </body>
 </html>
