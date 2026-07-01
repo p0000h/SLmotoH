@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 28');
+alert('🔢 Версия скрипта: 29');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -335,154 +335,97 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    // ===== ДИАГНОСТИКА =====
-    const secretMd5 = md5(APP_SECRET);
+    const OLD_API = 'https://starline-online.ru';
     
-    // Проверка MD5 на известной строке
-    const testMd5 = md5('test');
-    const expectedTestMd5 = '098f6bcd4621d373cade4e832627b4f6'; // MD5 от 'test'
+    // 1. Авторизация через старое API (как в Android-приложении)
+    alert('🔍 1/3: Авторизация (starline-online.ru)');
+    let body = `username=${encodeURIComponent(login)}&password=${encodeURIComponent(password)}`;
+    if (captchaSid && captchaCode) {
+        body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
+    }
+    
+    const loginRes = await fetchWithProxy(`${OLD_API}/rest/security/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+    }, useProxy);
+    
+    const loginText = await loginRes.text();
+    alert('Ответ login: ' + loginText.substring(0, 500));
+    
+    // Проверяем капчу
+    try {
+        const loginData = JSON.parse(loginText);
+        if (loginData?.desc?.message?.includes('Captcha')) {
+            pendingLoginData = { login, password, dateFrom, useProxy };
+            currentCaptchaSid = loginData.desc.captchaSid;
+            if (captchaImg) captchaImg.src = loginData.desc.captchaImg;
+            if (captchaCodeInput) captchaCodeInput.value = '';
+            if (captchaBlock) captchaBlock.classList.remove('hidden');
+            throw new Error('CAPTCHA_REQUIRED');
+        }
+    } catch (e) {
+        if (e.message === 'CAPTCHA_REQUIRED') throw e;
+    }
+    
+    // Получаем cookies из ответа прокси
+    const setCookieHeader = loginRes.headers.get('X-Set-Cookie') || loginRes.headers.get('Set-Cookie');
+    let sessionCookie = '';
+    if (setCookieHeader) {
+        sessionCookie = setCookieHeader;
+    }
+    alert('Session cookie: ' + (sessionCookie ? 'получен (' + sessionCookie.length + ' симв.)' : 'НЕТ'));
+    
+    // 2. Получаем device_id через старое API
+    alert('🔍 2/3: Получение device_id');
+    const deviceRes = await fetchWithProxy(`${OLD_API}/device`, {
+        headers: { 
+            'X-Cookie': sessionCookie,
+            'Accept-Language': 'ru-RU,ru;q=0.9'
+        }
+    }, useProxy);
+    const deviceData = await deviceRes.json();
+    
+    alert('Ответ device: ' + JSON.stringify(deviceData).substring(0, 500));
+    
+    const deviceId = deviceData?.answer?.devices?.[0]?.device_id;
+    if (!deviceId) throw new Error('Не найдено устройство: ' + JSON.stringify(deviceData));
+    alert('Device ID: ' + deviceId);
+    
+    // 3. Получаем историю событий через старое API (GET с параметрами в URL)
+    alert('🔍 3/3: События');
+    const startTime = Math.floor(dateFrom.getTime() / 1000);
+    const endTime = Math.floor(Date.now() / 1000);
+    
+    const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
+    alert('URL: ' + eventsUrl);
+    
+    const eventsRes = await fetchWithProxy(eventsUrl, {
+        method: 'GET',
+        headers: { 
+            'X-Cookie': sessionCookie,
+            'Accept-Language': 'ru-RU,ru;q=0.9'
+        }
+    }, useProxy);
+    const eventsData = await eventsRes.json();
+    
+    const events = eventsData?.answer?.events || eventsData?.events || [];
     
     alert(
-        '🔍 ДИАГНОСТИКА\n\n' +
-        'APP_ID: ' + APP_ID + '\n' +
-        'APP_SECRET: ' + APP_SECRET.substring(0, 10) + '... (длина: ' + APP_SECRET.length + ')\n' +
-        'MD5 от SECRET: ' + secretMd5 + '\n\n' +
-        'Проверка MD5:\n' +
-        'MD5("test") = ' + testMd5 + '\n' +
-        'Ожидалось:   ' + expectedTestMd5 + '\n' +
-        'Совпадает: ' + (testMd5 === expectedTestMd5 ? '✅ ДА' : '❌ НЕТ')
+        '🔍 Ответ events:\n\n' +
+        'Всего событий: ' + events.length + '\n\n' +
+        'Первые 10:\n' + 
+        JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
     );
     
-    if (testMd5 !== expectedTestMd5) {
-        throw new Error('MD5 работает неправильно! Тест не прошёл.');
-    }
-    // ===== КОНЕЦ ДИАГНОСТИКИ =====
+    window.debugInfo = {
+        deviceId,
+        totalEvents: events.length,
+        firstEvents: events.slice(0, 10),
+        raw: eventsData
+    };
     
-    alert('🔍 1/6: getCode');
-    const codeRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`, {}, useProxy);
-    const codeData = await codeRes.json();
-    
-    alert('Ответ getCode:\n' + JSON.stringify(codeData, null, 2));
-    
-    if (codeData.state !== 1) throw new Error('getCode: ' + JSON.stringify(codeData));
-    const appCode = codeData.desc.code;
-    
-    alert('🔍 2/6: getToken');
-    const secretCodeMd5 = md5(APP_SECRET + appCode);
-    const tokenRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`, {}, useProxy);
-    const tokenData = await tokenRes.json();
-    if (tokenData.state !== 1) throw new Error('getToken: ' + JSON.stringify(tokenData));
-    const appToken = tokenData.desc.token;
-
-    alert('🔍 3/6: user/login');
-    const passwordSha1 = await sha1(password);
-    let body = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
-    if (captchaSid && captchaCode) body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
-
-    const userLoginRes = await fetchWithProxy(`${STARLINE_ID_URL}/user/login?token=${appToken}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
-    }, useProxy);
-    const userLoginData = await userLoginRes.json();
-// ===== ДИАГНОСТИКА user/login =====
-alert(
-    '🔍 Ответ user/login:\n\n' + 
-    'State: ' + userLoginData.state + '\n' +
-    'Message: ' + (userLoginData.desc?.message || 'нет') + '\n\n' +
-    'Полный ответ:\n' + JSON.stringify(userLoginData, null, 2)
-);
-// ===== КОНЕЦ ДИАГНОСТИКИ =====
-
-    if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
-        pendingLoginData = { login, password, dateFrom, useProxy };
-        currentCaptchaSid = userLoginData.desc.captchaSid;
-        if (captchaImg) captchaImg.src = userLoginData.desc.captchaImg;
-        if (captchaCodeInput) captchaCodeInput.value = '';
-        if (captchaBlock) captchaBlock.classList.remove('hidden');
-        throw new Error('CAPTCHA_REQUIRED');
-    }
-    if (userLoginData.state !== 1) throw new Error('login: ' + JSON.stringify(userLoginData));
-    const userToken = userLoginData.desc.user_token;
-
-alert('🔍 4/6: auth.slid');
-alert('Отправляем slid_token: ' + userToken.substring(0, 20) + '...');
-
-// Добавляем таймаут 10 секунд
-const timeoutPromise = new Promise((_, reject) => 
-    setTimeout(() => reject(new Error('Таймаут 10 секунд')), 10000)
-);
-
-const authPromise = fetchWithProxy(`${STARLINE_API_URL}/json/v2/auth.slid`, {
-    method: 'POST', 
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slid_token: userToken })
-}, useProxy);
-
-const slnetRes = await Promise.race([authPromise, timeoutPromise]);
-const slnetData = await slnetRes.json();
-
-alert(
-    '🔍 Ответ auth.slid:\n\n' +
-    'Code: ' + slnetData.code + '\n' +
-    'User ID: ' + (slnetData.user_id || 'нет') + '\n' +
-    'SLNET: ' + (slnetData.slnet ? 'получен' : 'НЕТ') + '\n' +
-    'X-Set-Cookie: ' + (slnetRes.headers.get('X-Set-Cookie') ? 'есть' : 'НЕТ') + '\n\n' +
-    'Полный ответ:\n' + JSON.stringify(slnetData, null, 2)
-);
-
-if (slnetData.code != 200) throw new Error('auth.slid: ' + JSON.stringify(slnetData));
-
-const setCookie = slnetRes.headers.get('X-Set-Cookie');
-let slnetToken = slnetData.slnet;
-if (!slnetToken && setCookie) {
-    const m = setCookie.match(/slnet=([^;]+)/);
-    if (m) slnetToken = m[1];
-}
-const userId = slnetData.user_id;
-if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
-
-    alert('🔍 5/6: user_info');
-    const devicesRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/user/${userId}/user_info`, {
-        headers: { 'X-Cookie': `slnet=${slnetToken}`, 'Content-Type': 'application/json' }
-    }, useProxy);
-    const devicesData = await devicesRes.json();
-    if (devicesData.code != 200) throw new Error('user_info: ' + JSON.stringify(devicesData));
-    const deviceId = devicesData.devices?.[0]?.device_id;
-    if (!deviceId) throw new Error('Нет устройств');
-
-alert('🔍 6/6: events (deviceId=' + deviceId + ')');
-const startTime = Math.floor(dateFrom.getTime() / 1000);
-const endTime = Math.floor(Date.now() / 1000);
-alert('Период: ' + new Date(startTime * 1000).toLocaleDateString('ru-RU') + ' — ' + new Date(endTime * 1000).toLocaleDateString('ru-RU'));
-
-// GET-запрос с параметрами в URL
-const eventsUrl = `${STARLINE_API_URL}/json/v2/device/${deviceId}/events?start=${startTime}&end=${endTime}&limit=1000`;
-alert('URL: ' + eventsUrl);
-
-const eventsRes = await fetchWithProxy(eventsUrl, {
-    method: 'GET',
-    headers: { 
-        'X-Cookie': `slnet=${slnetToken}`,
-        'Content-Type': 'application/json'
-    }
-}, useProxy);
-const eventsData = await eventsRes.json();
-
-alert(
-    '🔍 Ответ events:\n\n' +
-    'Код: ' + eventsData.code + '\n' +
-    'Всего событий: ' + (eventsData.events?.length || 0) + '\n\n' +
-    'Первые 10:\n' + 
-    JSON.stringify(eventsData.events?.slice(0, 10) || eventsData.answer?.events?.slice(0, 10) || [], null, 2).substring(0, 1500)
-);
-
-window.debugInfo = {
-    deviceId, userId,
-    totalEvents: eventsData.events?.length || 0,
-    firstEvents: eventsData.events?.slice(0, 10) || [],
-    raw: eventsData
-};
-
-return eventsData.events || eventsData.answer?.events || [];
+    return events;
 }
 
 // ===== ПОДСЧЁТ =====
