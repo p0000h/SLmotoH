@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 30');
+alert('🔢 Версия скрипта: 31');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -400,39 +400,42 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     alert('Device ID: ' + deviceId);
     
     // 3. Получаем историю событий через старое API (GET с параметрами в URL)
-    alert('🔍 3/3: События');
-    const startTime = Math.floor(dateFrom.getTime() / 1000);
-    const endTime = Math.floor(Date.now() / 1000);
-    
-    const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
-    alert('URL: ' + eventsUrl);
-    
-    const eventsRes = await fetchWithProxy(eventsUrl, {
-        method: 'GET',
-        headers: { 
-            'X-Cookie': sessionCookie,
-            'Accept-Language': 'ru-RU,ru;q=0.9'
-        }
-    }, useProxy);
-    const eventsData = await eventsRes.json();
-    
-    const events = eventsData?.answer?.events || eventsData?.events || [];
-    
-    alert(
-        '🔍 Ответ events:\n\n' +
-        'Всего событий: ' + events.length + '\n\n' +
-        'Первые 10:\n' + 
-        JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
-    );
-    
-    window.debugInfo = {
-        deviceId,
-        totalEvents: events.length,
-        firstEvents: events.slice(0, 10),
-        raw: eventsData
-    };
-    
-    return events;
+alert('🔍 3/3: События');
+const startTime = Math.floor(dateFrom.getTime() / 1000);
+const endTime = Math.floor(Date.now() / 1000);
+
+// Передаём cookie через параметр URL (_ck), а НЕ через заголовок
+const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
+
+// Кодируем cookie для безопасной передачи в URL
+const encodedCookie = encodeURIComponent(sessionCookie);
+const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(eventsUrl) + '&_ck=' + encodedCookie;
+
+alert('Запрос событий...');
+
+const eventsRes = await fetch(proxyUrl, {
+    method: 'GET',
+    headers: { 'Accept-Language': 'ru-RU,ru;q=0.9' }
+});
+const eventsData = await eventsRes.json();
+
+const events = eventsData?.answer?.events || eventsData?.events || [];
+
+alert(
+    '🔍 Ответ events:\n\n' +
+    'Всего событий: ' + events.length + '\n\n' +
+    'Первые 10:\n' +
+    JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
+);
+
+window.debugInfo = {
+    deviceId,
+    totalEvents: events.length,
+    firstEvents: events.slice(0, 10),
+    raw: eventsData
+};
+
+return events;
 }
 
 // ===== ПОДСЧЁТ =====
