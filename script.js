@@ -400,13 +400,31 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         }
     }
 
-    // Сохраняем cookie в Worker
+   // Сохраняем cookie в Worker
     if (!loginRes.cookie) {
         throw new Error('Не получен session cookie после логина');
     }
+    
+    alert('Сохраняем cookie: "' + loginRes.cookie.substring(0, 80) + '..."');
     const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(loginRes.cookie);
-    await fetch(saveUrl);
-    alert('🔍 2/3: Cookie сохранён');
+    const saveRes = await fetch(saveUrl);
+    const saveData = await saveRes.json();
+    alert('Ответ сохранения: ' + JSON.stringify(saveData));
+    
+    // Проверяем, что cookie действительно сохранился — делаем тестовый запрос к /device
+    alert('🔍 2/3: Проверка device (тест)');
+    const testDeviceRes = await proxyFetch(`${BASE_URL}/device`, {
+        headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
+    });
+    alert('Тест device статус: ' + testDeviceRes.status);
+    alert('Тест device тело (первые 200): ' + testDeviceRes.body.substring(0, 200));
+    
+    // Если HTML — значит cookie не подставился
+    if (testDeviceRes.body.trim().startsWith('<')) {
+        throw new Error('Cookie НЕ подставился! Worker не передаёт cookie. Ответ: HTML страница.');
+    }
+    
+    alert('🔍 2/3: Cookie работает ✅');
 
     // 2. Получаем device_id
     const deviceRes = await proxyFetch(`${BASE_URL}/device`, {
