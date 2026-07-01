@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 35');
+alert('🔢 Версия скрипта: 36');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -335,8 +335,7 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    const ID_URL = 'https://id.starline.ru/apiV3';
-    const API_URL = 'https://developer.starline.ru';
+    const BASE_URL = 'https://starline-online.ru';
     const PROXY = CORS_PROXIES[0];
 
     async function proxyFetch(url, options = {}) {
@@ -356,138 +355,93 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         };
     }
 
-    // 1. getCode
-    alert('🔍 1/6: getCode');
-    const secretMd5 = md5(APP_SECRET);
-    const codeRes = await proxyFetch(`${ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`);
-    const codeData = codeRes.json();
-    if (codeData.state !== 1) throw new Error('getCode: ' + codeRes.body.substring(0, 200));
-    const appCode = codeData.desc.code;
-
-    // 2. getToken
-    alert('🔍 2/6: getToken');
-    const secretCodeMd5 = md5(APP_SECRET + appCode);
-    const tokenRes = await proxyFetch(`${ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`);
-    const tokenData = tokenRes.json();
-    if (tokenData.state !== 1) throw new Error('getToken: ' + tokenRes.body.substring(0, 200));
-    const appToken = tokenData.desc.token;
-
-    // 3. user/login
-    alert('🔍 3/6: user/login');
-    const passwordSha1 = await sha1(password);
-    let loginBody = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
+    // 1. Логин (JSON body, как в Android-приложении!)
+    alert('🔍 1/3: Логин');
+    let loginBody = JSON.stringify({ username: login, password: password });
     if (captchaSid && captchaCode) {
-        loginBody += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
+        loginBody = JSON.stringify({ 
+            username: login, password: password,
+            captchaSid: captchaSid, captchaCode: captchaCode 
+        });
     }
-    const userLoginRes = await proxyFetch(`${ID_URL}/user/login?token=${appToken}`, {
+
+    const loginRes = await proxyFetch(`${BASE_URL}/rest/security/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
         body: loginBody
     });
-    const userLoginData = userLoginRes.json();
 
-    if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
-        pendingLoginData = { login, password, dateFrom, useProxy };
-        currentCaptchaSid = userLoginData.desc.captchaSid;
-        if (captchaImg) captchaImg.src = userLoginData.desc.captchaImg;
-        if (captchaCodeInput) captchaCodeInput.value = '';
-        if (captchaBlock) captchaBlock.classList.remove('hidden');
-        throw new Error('CAPTCHA_REQUIRED');
+    alert('Логин статус: ' + loginRes.status + ', тело: "' + loginRes.body.substring(0, 200) + '"');
+    alert('Cookie: "' + loginRes.cookie.substring(0, 80) + '..."');
+
+    // Проверяем капчу (если тело не пустое — возможно ошибка или капча)
+    if (loginRes.body && loginRes.body.trim().length > 0) {
+        try {
+            const loginData = JSON.parse(loginRes.body);
+            if (loginData?.desc?.message?.includes('Captcha')) {
+                pendingLoginData = { login, password, dateFrom, useProxy };
+                currentCaptchaSid = loginData.desc.captchaSid;
+                if (captchaImg) captchaImg.src = loginData.desc.captchaImg;
+                if (captchaCodeInput) captchaCodeInput.value = '';
+                if (captchaBlock) captchaBlock.classList.remove('hidden');
+                throw new Error('CAPTCHA_REQUIRED');
+            }
+            throw new Error('Ошибка логина: ' + loginRes.body.substring(0, 200));
+        } catch (e) {
+            if (e.message === 'CAPTCHA_REQUIRED') throw e;
+            // Если не JSON и не капча — возможно это HTML ошибка
+            if (loginRes.body.includes('<')) {
+                throw new Error('Сервер вернул HTML вместо JSON. Проверь логин/пароль.');
+            }
+            throw e;
+        }
     }
-    if (userLoginData.state !== 1) throw new Error('login: ' + userLoginRes.body.substring(0, 200));
-    const userToken = userLoginData.desc.user_token;
 
-    // 4. auth.slid
-    alert('🔍 4/6: auth.slid');
-    const slnetRes = await proxyFetch(`${API_URL}/json/v2/auth.slid`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slid_token: userToken })
-    });
-    const slnetData = slnetRes.json();
-    if (slnetData.code != 200) throw new Error('auth.slid: ' + slnetRes.body.substring(0, 200));
-
-    // Получаем slnet из cookie в теле ответа
-    let slnetToken = slnetData.slnet || '';
-    if (!slnetToken && slnetRes.cookie) {
-        const m = slnetRes.cookie.match(/slnet=([^;]+)/);
-        if (m) slnetToken = m[1];
+    // Сохраняем cookie в Worker
+    if (!loginRes.cookie) {
+        throw new Error('Не получен session cookie после логина');
     }
-    const userId = slnetData.user_id;
-    if (!userId || !slnetToken) throw new Error('Нет user_id или slnet. Cookie: ' + slnetRes.cookie);
-
-    // Сохраняем slnet в Worker
-    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent('slnet=' + slnetToken);
+    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(loginRes.cookie);
     await fetch(saveUrl);
+    alert('🔍 2/3: Cookie сохранён');
 
-    // 5. user_info
-    alert('🔍 5/6: user_info');
-    const devicesRes = await proxyFetch(`${API_URL}/json/v2/user/${userId}/user_info`);
-    const devicesData = devicesRes.json();
-    if (devicesData.code != 200) throw new Error('user_info: ' + devicesRes.body.substring(0, 200));
-    const deviceId = devicesData.devices?.[0]?.device_id;
-    if (!deviceId) throw new Error('Нет устройств: ' + devicesRes.body.substring(0, 200));
+    // 2. Получаем device_id
+    const deviceRes = await proxyFetch(`${BASE_URL}/device`, {
+        headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
+    });
+    
+    alert('Device ответ: ' + deviceRes.body.substring(0, 300));
+    
+    const deviceData = deviceRes.json();
+    const deviceId = deviceData?.answer?.devices?.[0]?.device_id?.toString();
+    if (!deviceId) throw new Error('Не найдено устройство: ' + deviceRes.body.substring(0, 200));
     alert('Device ID: ' + deviceId);
 
-    // 6. events — GET с параметрами в URL
-  alert('🔍 6/6: events');
-const startTime = Math.floor(dateFrom.getTime() / 1000);
-const endTime = Math.floor(Date.now() / 1000);
+    // 3. Получаем события
+    alert('🔍 3/3: События');
+    const startTime = Math.floor(dateFrom.getTime() / 1000);
+    const endTime = Math.floor(Date.now() / 1000);
+    const eventsUrl = `${BASE_URL}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
 
-// Пробуем POST с разными форматами body
-const eventsUrl = `${API_URL}/json/v2/device/${deviceId}/events`;
-
-// Формат 1: {from, to}
-alert('Проба 1: {from, to}');
-let eventsRes = await proxyFetch(eventsUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: startTime, to: endTime })
-});
-let eventsData = eventsRes.json();
-alert('Формат 1 ответ: ' + eventsRes.body.substring(0, 300));
-
-// Формат 2: {startTime, endTime}
-if (eventsData.code == 500 || eventsData.code == 400) {
-    alert('Проба 2: {startTime, endTime}');
-    eventsRes = await proxyFetch(eventsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startTime: startTime, endTime: endTime })
+    const eventsRes = await proxyFetch(eventsUrl, {
+        headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
     });
-    eventsData = eventsRes.json();
-    alert('Формат 2 ответ: ' + eventsRes.body.substring(0, 300));
-}
 
-// Формат 3: {start_time, end_time}
-if (eventsData.code == 500 || eventsData.code == 400) {
-    alert('Проба 3: {start_time, end_time}');
-    eventsRes = await proxyFetch(eventsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_time: startTime, end_time: endTime })
-    });
-    eventsData = eventsRes.json();
-    alert('Формат 3 ответ: ' + eventsRes.body.substring(0, 300));
-}
+    alert('Events статус: ' + eventsRes.status + ', длина: ' + eventsRes.body.length);
 
-// Формат 4: {start, end} (без limit)
-if (eventsData.code == 500 || eventsData.code == 400) {
-    alert('Проба 4: {start, end} без limit');
-    eventsRes = await proxyFetch(eventsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start: startTime, end: endTime })
-    });
-    eventsData = eventsRes.json();
-    alert('Формат 4 ответ: ' + eventsRes.body.substring(0, 300));
-}
+    const eventsData = eventsRes.json();
+    const events = eventsData?.answer?.events || eventsData?.events || [];
 
-const events = eventsData.events || eventsData.answer?.events || [];
-alert('Всего событий: ' + events.length + '\nКод: ' + eventsData.code);
+    alert('Всего событий: ' + events.length);
+    if (events.length > 0) {
+        alert('Первое событие: ' + JSON.stringify(events[0], null, 2).substring(0, 500));
+    }
 
-window.debugInfo = { deviceId, userId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
-return events;
+    window.debugInfo = { deviceId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
+    return events;
 }
 // ===== ПОДСЧЁТ =====
 function calculateEngineHours(rawEvents) {
