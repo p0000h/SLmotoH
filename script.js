@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 32');
+alert('🔢 Версия скрипта: 33');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -338,7 +338,7 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
     const OLD_API = 'https://starline-online.ru';
     const PROXY = CORS_PROXIES[0];
 
-    // Вспомогательная функция: простой GET/POST через прокси БЕЗ cookie в заголовках
+    // Универсальная функция: все ответы приходят обёрнутыми в {_proxy_cookie, _proxy_body}
     async function proxyFetch(url, options = {}) {
         const proxyUrl = PROXY + encodeURIComponent(url);
         const res = await fetch(proxyUrl, {
@@ -346,7 +346,14 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
             headers: options.headers || {},
             body: options.body || undefined
         });
-        return res;
+        const wrapper = await res.json();
+        return {
+            cookie: wrapper._proxy_cookie || '',
+            status: wrapper._proxy_status || 0,
+            body: wrapper._proxy_body || '',
+            json: () => JSON.parse(wrapper._proxy_body || '{}'),
+            text: () => wrapper._proxy_body || ''
+        };
     }
 
     // 1. Авторизация
@@ -362,12 +369,12 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         body: body
     });
 
-    const loginText = await loginRes.text();
-    alert('Ответ login: ' + loginText.substring(0, 300));
+    alert('Ответ login (status=' + loginRes.status + '):\n' + loginRes.body.substring(0, 300));
+    alert('Cookie из прокси: "' + loginRes.cookie + '"');
 
     // Проверяем капчу
     try {
-        const loginData = JSON.parse(loginText);
+        const loginData = JSON.parse(loginRes.body);
         if (loginData?.desc?.message?.includes('Captcha')) {
             pendingLoginData = { login, password, dateFrom, useProxy };
             currentCaptchaSid = loginData.desc.captchaSid;
@@ -380,62 +387,43 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         if (e.message === 'CAPTCHA_REQUIRED') throw e;
     }
 
-    // Получаем cookie из ответа
-    const rawCookie = loginRes.headers.get('X-Set-Cookie') || loginRes.headers.get('Set-Cookie') || '';
-    let sessionCookie = rawCookie.split('\n')[0].split(',')[0].trim();
-    if (sessionCookie.includes(';')) {
-        sessionCookie = sessionCookie.split(';')[0].trim();
-    }
-    alert('Cookie: "' + sessionCookie.substring(0, 50) + '..."');
-
+    const sessionCookie = loginRes.cookie;
     if (!sessionCookie) {
-        throw new Error('Не получен session cookie');
+        throw new Error('Не получен session cookie. Ответ: ' + loginRes.body.substring(0, 200));
     }
 
-    // 2. Сохраняем cookie в Worker (отдельный запрос, без проблемных заголовков)
-    alert('🔍 2/4: Сохранение cookie в прокси');
+    // 2. Сохраняем cookie в Worker
+    alert('🔍 2/4: Сохранение cookie');
     const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(sessionCookie);
-    await fetch(saveUrl);
-    alert('Cookie сохранён в прокси');
+    const saveRes = await fetch(saveUrl);
+    const saveData = await saveRes.json();
+    alert('Сохранено: ' + JSON.stringify(saveData));
 
-    // 3. Получаем device_id (cookie подставится автоматически из Worker)
-    alert('🔍 3/4: Получение device_id');
+    // 3. Получаем device_id
+    alert('🔍 3/4: Device ID');
     const deviceRes = await proxyFetch(`${OLD_API}/device`);
-    const deviceData = await deviceRes.json();
+    alert('Ответ device: ' + deviceRes.body.substring(0, 300));
 
-    alert('Ответ device: ' + JSON.stringify(deviceData).substring(0, 300));
-
+    const deviceData = deviceRes.json();
     const deviceId = deviceData?.answer?.devices?.[0]?.device_id;
-    if (!deviceId) throw new Error('Не найдено устройство: ' + JSON.stringify(deviceData));
+    if (!deviceId) throw new Error('Не найдено устройство: ' + deviceRes.body.substring(0, 200));
     alert('Device ID: ' + deviceId);
 
-    // 4. Получаем события (cookie подставится автоматически из Worker)
+    // 4. События
     alert('🔍 4/4: События');
     const startTime = Math.floor(dateFrom.getTime() / 1000);
     const endTime = Math.floor(Date.now() / 1000);
-
     const eventsUrl = `${OLD_API}/events/history?startTime=${startTime}&endTime=${endTime}&deviceId=${deviceId}`;
-    alert('URL: ' + eventsUrl);
 
     const eventsRes = await proxyFetch(eventsUrl);
-    const eventsData = await eventsRes.json();
+    alert('Ответ events: ' + eventsRes.body.substring(0, 500));
 
+    const eventsData = eventsRes.json();
     const events = eventsData?.answer?.events || eventsData?.events || [];
 
-    alert(
-        '🔍 Ответ events:\n\n' +
-        'Всего событий: ' + events.length + '\n\n' +
-        'Первые 10:\n' +
-        JSON.stringify(events.slice(0, 10), null, 2).substring(0, 1500)
-    );
+    alert('Всего событий: ' + events.length);
 
-    window.debugInfo = {
-        deviceId,
-        totalEvents: events.length,
-        firstEvents: events.slice(0, 10),
-        raw: eventsData
-    };
-
+    window.debugInfo = { deviceId, totalEvents: events.length, firstEvents: events.slice(0, 10), raw: eventsData };
     return events;
 }
 
