@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 21');
+alert('🔢 Версия скрипта: 22');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -383,6 +383,14 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
     }, useProxy);
     const userLoginData = await userLoginRes.json();
+// ===== ДИАГНОСТИКА user/login =====
+alert(
+    '🔍 Ответ user/login:\n\n' + 
+    'State: ' + userLoginData.state + '\n' +
+    'Message: ' + (userLoginData.desc?.message || 'нет') + '\n\n' +
+    'Полный ответ:\n' + JSON.stringify(userLoginData, null, 2)
+);
+// ===== КОНЕЦ ДИАГНОСТИКИ =====
 
     if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
         pendingLoginData = { login, password, dateFrom, useProxy };
