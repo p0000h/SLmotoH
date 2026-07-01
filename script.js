@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 27');
+alert('🔢 Версия скрипта: 28');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -454,28 +454,31 @@ const startTime = Math.floor(dateFrom.getTime() / 1000);
 const endTime = Math.floor(Date.now() / 1000);
 alert('Период: ' + new Date(startTime * 1000).toLocaleDateString('ru-RU') + ' — ' + new Date(endTime * 1000).toLocaleDateString('ru-RU'));
 
-const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${deviceId}/events`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Cookie': `slnet=${slnetToken}` },
-    body: JSON.stringify({ 
-        start: startTime, 
-        end: endTime,
-        limit: 1000
-    })
+// GET-запрос с параметрами в URL
+const eventsUrl = `${STARLINE_API_URL}/json/v2/device/${deviceId}/events?start=${startTime}&end=${endTime}&limit=1000`;
+alert('URL: ' + eventsUrl);
+
+const eventsRes = await fetchWithProxy(eventsUrl, {
+    method: 'GET',
+    headers: { 
+        'X-Cookie': `slnet=${slnetToken}`,
+        'Content-Type': 'application/json'
+    }
 }, useProxy);
 const eventsData = await eventsRes.json();
 
-// ПОЛНАЯ ДИАГНОСТИКА
 alert(
-    '🔍 ПОЛНЫЙ ОТВЕТ API:\n\n' +
+    '🔍 Ответ events:\n\n' +
     'Код: ' + eventsData.code + '\n' +
-    'Сообщение: ' + (eventsData.message || eventsData.codestring || 'нет') + '\n\n' +
-    'Весь JSON (первые 2000 символов):\n' + 
-    JSON.stringify(eventsData, null, 2).substring(0, 2000)
+    'Всего событий: ' + (eventsData.events?.length || 0) + '\n\n' +
+    'Первые 10:\n' + 
+    JSON.stringify(eventsData.events?.slice(0, 10) || eventsData.answer?.events?.slice(0, 10) || [], null, 2).substring(0, 1500)
 );
 
 window.debugInfo = {
     deviceId, userId,
+    totalEvents: eventsData.events?.length || 0,
+    firstEvents: eventsData.events?.slice(0, 10) || [],
     raw: eventsData
 };
 
