@@ -1,4 +1,4 @@
-alert('🔢 Версия скрипта: 37');
+alert('🔢 Версия скрипта: 38');
 // ===== КОНФИГУРАЦИЯ =====
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
@@ -336,16 +336,22 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
     const BASE_URL = 'https://starline-online.ru';
-    const PROXY = CORS_PROXIES[0];
+    const PROXY_BASE = CORS_PROXIES[0]; // например https://xxx.workers.dev/?url=
 
-    async function proxyFetch(url, options = {}) {
-        const proxyUrl = PROXY + encodeURIComponent(url);
+    // Прокси-функция: передаёт cookie через _ck в КАЖДОМ запросе
+    async function proxyFetch(url, options = {}, cookie = '') {
+        // Формируем URL прокси с _ck как отдельным параметром
+        let proxyUrl = PROXY_BASE + encodeURIComponent(url);
+        if (cookie) {
+            proxyUrl += '&_ck=' + encodeURIComponent(cookie);
+        }
         const res = await fetch(proxyUrl, {
             method: options.method || 'GET',
             headers: options.headers || {},
             body: options.body || undefined
         });
         const wrapper = await res.json();
+        if (wrapper._proxy_error) throw new Error('Proxy: ' + wrapper._proxy_error);
         return {
             cookie: wrapper._proxy_cookie || '',
             status: wrapper._proxy_status || 0,
@@ -355,29 +361,29 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
         };
     }
 
-    // 1. Логин (JSON body, как в Android-приложении!)
+    // 1. Логин (JSON body, как в Android-приложении)
     alert('🔍 1/3: Логин');
     let loginBody = JSON.stringify({ username: login, password: password });
     if (captchaSid && captchaCode) {
-        loginBody = JSON.stringify({ 
+        loginBody = JSON.stringify({
             username: login, password: password,
-            captchaSid: captchaSid, captchaCode: captchaCode 
+            captchaSid: captchaSid, captchaCode: captchaCode
         });
     }
 
     const loginRes = await proxyFetch(`${BASE_URL}/rest/security/login`, {
         method: 'POST',
-        headers: { 
+        headers: {
             'Content-Type': 'application/json',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
         },
         body: loginBody
-    });
+    }, ''); // без cookie для логина
 
     alert('Логин статус: ' + loginRes.status + ', тело: "' + loginRes.body.substring(0, 200) + '"');
-    alert('Cookie: "' + loginRes.cookie.substring(0, 80) + '..."');
+    alert('Cookie получен: "' + loginRes.cookie.substring(0, 80) + '..."');
 
-    // Проверяем капчу (если тело не пустое — возможно ошибка или капча)
+    // Проверяем капчу
     if (loginRes.body && loginRes.body.trim().length > 0) {
         try {
             const loginData = JSON.parse(loginRes.body);
@@ -392,53 +398,36 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
             throw new Error('Ошибка логина: ' + loginRes.body.substring(0, 200));
         } catch (e) {
             if (e.message === 'CAPTCHA_REQUIRED') throw e;
-            // Если не JSON и не капча — возможно это HTML ошибка
             if (loginRes.body.includes('<')) {
-                throw new Error('Сервер вернул HTML вместо JSON. Проверь логин/пароль.');
+                throw new Error('Сервер вернул HTML. Проверь логин/пароль.');
             }
             throw e;
         }
     }
 
-   // Сохраняем cookie в Worker
-    if (!loginRes.cookie) {
+    const sessionCookie = loginRes.cookie;
+    if (!sessionCookie) {
         throw new Error('Не получен session cookie после логина');
     }
-    
-    alert('Сохраняем cookie: "' + loginRes.cookie.substring(0, 80) + '..."');
-    const saveUrl = PROXY + encodeURIComponent('https://example.com') + '&save_cookie=' + encodeURIComponent(loginRes.cookie);
-    const saveRes = await fetch(saveUrl);
-    const saveData = await saveRes.json();
-    alert('Ответ сохранения: ' + JSON.stringify(saveData));
-    
-    // Проверяем, что cookie действительно сохранился — делаем тестовый запрос к /device
-    alert('🔍 2/3: Проверка device (тест)');
-    const testDeviceRes = await proxyFetch(`${BASE_URL}/device`, {
-        headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
-    });
-    alert('Тест device статус: ' + testDeviceRes.status);
-    alert('Тест device тело (первые 200): ' + testDeviceRes.body.substring(0, 200));
-    
-    // Если HTML — значит cookie не подставился
-    if (testDeviceRes.body.trim().startsWith('<')) {
-        throw new Error('Cookie НЕ подставился! Worker не передаёт cookie. Ответ: HTML страница.');
-    }
-    
-    alert('🔍 2/3: Cookie работает ✅');
 
-    // 2. Получаем device_id
+    // 2. Получаем device_id (передаём cookie через _ck!)
+    alert('🔍 2/3: Device ID');
     const deviceRes = await proxyFetch(`${BASE_URL}/device`, {
         headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
-    });
-    
-    alert('Device ответ: ' + deviceRes.body.substring(0, 300));
-    
+    }, sessionCookie);
+
+    alert('Device статус: ' + deviceRes.status + ', тело: ' + deviceRes.body.substring(0, 300));
+
+    if (deviceRes.body.trim().startsWith('<')) {
+        throw new Error('Device вернул HTML! Cookie: "' + sessionCookie.substring(0, 50) + '..."');
+    }
+
     const deviceData = deviceRes.json();
     const deviceId = deviceData?.answer?.devices?.[0]?.device_id?.toString();
     if (!deviceId) throw new Error('Не найдено устройство: ' + deviceRes.body.substring(0, 200));
     alert('Device ID: ' + deviceId);
 
-    // 3. Получаем события
+    // 3. Получаем события (передаём cookie через _ck!)
     alert('🔍 3/3: События');
     const startTime = Math.floor(dateFrom.getTime() / 1000);
     const endTime = Math.floor(Date.now() / 1000);
@@ -446,7 +435,7 @@ async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = nul
 
     const eventsRes = await proxyFetch(eventsUrl, {
         headers: { 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7' }
-    });
+    }, sessionCookie);
 
     alert('Events статус: ' + eventsRes.status + ', длина: ' + eventsRes.body.length);
 
