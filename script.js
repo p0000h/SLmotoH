@@ -2,117 +2,136 @@
 const STARLINE_ID_URL = 'https://id.starline.ru/apiV3';
 const STARLINE_API_URL = 'https://developer.starline.ru';
 
-const APP_ID = '50254; 
+const APP_ID = '50254'; 
 const APP_SECRET = 'JfZ5bOVZHUbGTCj6PDxvYX75oD5MiwRP';
 const CORS_PROXIES = [ 'https://wandering-mode-2cec.nikitinsv.workers.dev/?url=' ];
 
 const START_COMMANDS = [1037, 20532, 601];
 const STOP_COMMANDS = [1042, 602];
 
+// ===== ДИАГНОСТИКА: проверяем загрузку =====
+alert('✅ Скрипт загружен!');
+
+// ===== Безопасная функция для поиска элементов =====
+function $(id) {
+    const el = document.getElementById(id);
+    if (!el) console.warn('Элемент не найден: ' + id);
+    return el;
+}
+
 // ===== DOM =====
-const form = document.getElementById('loginForm');
-const loadingEl = document.getElementById('loading');
-const errorEl = document.getElementById('error');
-const resultsEl = document.getElementById('results');
-const submitBtn = document.getElementById('submitBtn');
-const captchaBlock = document.getElementById('captchaBlock');
-const captchaImg = document.getElementById('captchaImg');
-const captchaCodeInput = document.getElementById('captchaCode');
+const form = $('loginForm');
+const loadingEl = $('loading');
+const errorEl = $('error');
+const resultsEl = $('results');
+const submitBtn = $('submitBtn');
+const captchaBlock = $('captchaBlock');
+const captchaImg = $('captchaImg');
+const captchaCodeInput = $('captchaCode');
+const refreshCaptchaBtn = $('refreshCaptcha');
+const submitCaptchaBtn = $('submitCaptcha');
+const dateInput = $('dateFrom');
 
 let pendingLoginData = null;
 let currentCaptchaSid = null;
 
-const dateInput = document.getElementById('dateFrom');
-const monthAgo = new Date();
-monthAgo.setMonth(monthAgo.getMonth() - 1);
-dateInput.value = monthAgo.toISOString().split('T')[0];
+// Дата по умолчанию — месяц назад
+if (dateInput) {
+    const monthAgo = new Date();
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+    dateInput.value = monthAgo.toISOString().split('T')[0];
+}
 
+// Восстановление данных
 window.addEventListener('load', () => {
-    const saved = localStorage.getItem('starline_creds');
-    if (saved) {
-        try {
+    try {
+        const saved = localStorage.getItem('starline_creds');
+        if (saved) {
             const creds = JSON.parse(saved);
-            document.getElementById('login').value = creds.login || '';
-            document.getElementById('dateFrom').value = creds.dateFrom || dateInput.value;
-            document.getElementById('useProxy').checked = creds.useProxy !== false;
-        } catch (e) {}
-    }
-    
-    // Принудительная активация нового Service Worker
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(regs => {
-            regs.forEach(reg => reg.update());
-        });
-    }
-});
-
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const login = document.getElementById('login').value.trim();
-    const password = document.getElementById('password').value;
-    const dateFrom = new Date(document.getElementById('dateFrom').value);
-    const useProxy = document.getElementById('useProxy').checked;
-
-    localStorage.setItem('starline_creds', JSON.stringify({
-        login, dateFrom: document.getElementById('dateFrom').value, useProxy
-    }));
-
-    submitBtn.disabled = true;
-    loadingEl.classList.remove('hidden');
-    errorEl.classList.add('hidden');
-    resultsEl.classList.add('hidden');
-    captchaBlock.classList.add('hidden');
-
-    try {
-        alert('🔍 Шаг 1: начинаем авторизацию');
-        const events = await fetchEvents(login, password, dateFrom, useProxy);
-        alert('🔍 Шаг 2: получено событий: ' + (events?.length || 0));
-        const result = calculateEngineHours(events);
-        alert('🔍 Шаг 3: подсчёт завершён, моточасов: ' + (result.totalMs / 3600000).toFixed(2));
-        displayResults(result);
-    } catch (err) {
-        alert('❌ ОШИБКА: ' + err.message + '\n\nСтек: ' + err.stack);
-        showError(err.message);
-    } finally {
-        submitBtn.disabled = false;
-        loadingEl.classList.add('hidden');
-    }
-});
-
-document.getElementById('submitCaptcha').addEventListener('click', async () => {
-    const code = captchaCodeInput.value.trim();
-    if (!code) { showError('Введите код'); return; }
-    if (!pendingLoginData) { showError('Начните заново'); return; }
-
-    captchaBlock.classList.add('hidden');
-    loadingEl.classList.remove('hidden');
-
-    try {
-        const events = await fetchEvents(
-            pendingLoginData.login, pendingLoginData.password, 
-            pendingLoginData.dateFrom, pendingLoginData.useProxy,
-            currentCaptchaSid, code
-        );
-        displayResults(calculateEngineHours(events));
-    } catch (err) {
-        showError(err.message);
-    } finally {
-        loadingEl.classList.add('hidden');
-    }
-});
-
-document.getElementById('refreshCaptcha').addEventListener('click', async () => {
-    if (!pendingLoginData) return;
-    try {
-        const res = await fetchWithProxy(`${STARLINE_ID_URL}/captcha`, {}, pendingLoginData.useProxy);
-        const data = await res.json();
-        if (data.state === 1) {
-            currentCaptchaSid = data.desc.captchaSid;
-            captchaImg.src = data.desc.captchaImg;
+            if ($('login')) $('login').value = creds.login || '';
+            if ($('dateFrom')) $('dateFrom').value = creds.dateFrom || dateInput.value;
+            if ($('useProxy')) $('useProxy').checked = creds.useProxy !== false;
         }
-    } catch (e) {}
+    } catch (e) { console.error(e); }
 });
+
+// ===== ОБРАБОТЧИК ФОРМЫ =====
+if (form) {
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        alert('🚀 Форма отправлена! Начинаем...');
+        
+        const login = $('login').value.trim();
+        const password = $('password').value;
+        const dateFrom = new Date($('dateFrom').value);
+        const useProxy = $('useProxy').checked;
+
+        localStorage.setItem('starline_creds', JSON.stringify({
+            login, dateFrom: $('dateFrom').value, useProxy
+        }));
+
+        submitBtn.disabled = true;
+        loadingEl.classList.remove('hidden');
+        errorEl.classList.add('hidden');
+        resultsEl.classList.add('hidden');
+        if (captchaBlock) captchaBlock.classList.add('hidden');
+
+        try {
+            const events = await fetchEvents(login, password, dateFrom, useProxy);
+            const result = calculateEngineHours(events);
+            displayResults(result);
+        } catch (err) {
+            if (err.message !== 'CAPTCHA_REQUIRED') {
+                alert('❌ ОШИБКА: ' + err.message);
+                showError(err.message);
+            }
+        } finally {
+            submitBtn.disabled = false;
+            loadingEl.classList.add('hidden');
+        }
+    });
+} else {
+    alert('❌ Форма не найдена!');
+}
+
+// ===== КАПЧА =====
+if (submitCaptchaBtn) {
+    submitCaptchaBtn.addEventListener('click', async () => {
+        const code = captchaCodeInput.value.trim();
+        if (!code) { showError('Введите код'); return; }
+        if (!pendingLoginData) { showError('Начните заново'); return; }
+
+        if (captchaBlock) captchaBlock.classList.add('hidden');
+        loadingEl.classList.remove('hidden');
+
+        try {
+            const events = await fetchEvents(
+                pendingLoginData.login, pendingLoginData.password, 
+                pendingLoginData.dateFrom, pendingLoginData.useProxy,
+                currentCaptchaSid, code
+            );
+            displayResults(calculateEngineHours(events));
+        } catch (err) {
+            if (err.message !== 'CAPTCHA_REQUIRED') showError(err.message);
+        } finally {
+            loadingEl.classList.add('hidden');
+        }
+    });
+}
+
+if (refreshCaptchaBtn) {
+    refreshCaptchaBtn.addEventListener('click', async () => {
+        if (!pendingLoginData) return;
+        try {
+            const res = await fetchWithProxy(`${STARLINE_ID_URL}/captcha`, {}, pendingLoginData.useProxy);
+            const data = await res.json();
+            if (data.state === 1 && captchaImg) {
+                currentCaptchaSid = data.desc.captchaSid;
+                captchaImg.src = data.desc.captchaImg;
+            }
+        } catch (e) {}
+    });
+}
 
 // ===== SHA-1 =====
 async function sha1(str) {
@@ -208,90 +227,84 @@ async function fetchWithProxy(url, options = {}, useProxy = true) {
 
 // ===== АВТОРИЗАЦИЯ =====
 async function fetchEvents(login, password, dateFrom, useProxy, captchaSid = null, captchaCode = null) {
-    try {
-        alert('🔍 1/6: getCode');
-        const secretMd5 = md5(APP_SECRET);
-        const codeRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`, {}, useProxy);
-        const codeData = await codeRes.json();
-        if (codeData.state !== 1) throw new Error('getCode: ' + JSON.stringify(codeData));
-        const appCode = codeData.desc.code;
+    alert('🔍 1/6: getCode');
+    const secretMd5 = md5(APP_SECRET);
+    const codeRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getCode?appId=${APP_ID}&secret=${secretMd5}`, {}, useProxy);
+    const codeData = await codeRes.json();
+    if (codeData.state !== 1) throw new Error('getCode: ' + JSON.stringify(codeData));
+    const appCode = codeData.desc.code;
 
-        alert('🔍 2/6: getToken');
-        const secretCodeMd5 = md5(APP_SECRET + appCode);
-        const tokenRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`, {}, useProxy);
-        const tokenData = await tokenRes.json();
-        if (tokenData.state !== 1) throw new Error('getToken: ' + JSON.stringify(tokenData));
-        const appToken = tokenData.desc.token;
+    alert('🔍 2/6: getToken');
+    const secretCodeMd5 = md5(APP_SECRET + appCode);
+    const tokenRes = await fetchWithProxy(`${STARLINE_ID_URL}/application/getToken?appId=${APP_ID}&secret=${secretCodeMd5}`, {}, useProxy);
+    const tokenData = await tokenRes.json();
+    if (tokenData.state !== 1) throw new Error('getToken: ' + JSON.stringify(tokenData));
+    const appToken = tokenData.desc.token;
 
-        alert('🔍 3/6: user/login');
-        const passwordSha1 = await sha1(password);
-        let body = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
-        if (captchaSid && captchaCode) body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
+    alert('🔍 3/6: user/login');
+    const passwordSha1 = await sha1(password);
+    let body = `login=${encodeURIComponent(login)}&pass=${passwordSha1}`;
+    if (captchaSid && captchaCode) body += `&captchaSid=${encodeURIComponent(captchaSid)}&captchaCode=${encodeURIComponent(captchaCode)}`;
 
-        const userLoginRes = await fetchWithProxy(`${STARLINE_ID_URL}/user/login?token=${appToken}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
-        }, useProxy);
-        const userLoginData = await userLoginRes.json();
+    const userLoginRes = await fetchWithProxy(`${STARLINE_ID_URL}/user/login?token=${appToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+    }, useProxy);
+    const userLoginData = await userLoginRes.json();
 
-        if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
-            pendingLoginData = { login, password, dateFrom, useProxy };
-            currentCaptchaSid = userLoginData.desc.captchaSid;
-            captchaImg.src = userLoginData.desc.captchaImg;
-            captchaCodeInput.value = '';
-            captchaBlock.classList.remove('hidden');
-            throw new Error('CAPTCHA_REQUIRED');
-        }
-        if (userLoginData.state !== 1) throw new Error('login: ' + JSON.stringify(userLoginData));
-        const userToken = userLoginData.desc.user_token;
-
-        alert('🔍 4/6: auth.slid');
-        const slnetRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/auth.slid`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slid_token: userToken })
-        }, useProxy);
-        const slnetData = await slnetRes.json();
-        if (slnetData.code != 200) throw new Error('auth.slid: ' + JSON.stringify(slnetData));
-
-        const setCookie = slnetRes.headers.get('X-Set-Cookie');
-        let slnetToken = slnetData.slnet;
-        if (!slnetToken && setCookie) {
-            const m = setCookie.match(/slnet=([^;]+)/);
-            if (m) slnetToken = m[1];
-        }
-        const userId = slnetData.user_id;
-        if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
-
-        alert('🔍 5/6: user_info (userId=' + userId + ')');
-        const devicesRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/user/${userId}/user_info`, {
-            headers: { 'X-Cookie': `slnet=${slnetToken}`, 'Content-Type': 'application/json' }
-        }, useProxy);
-        const devicesData = await devicesRes.json();
-        if (devicesData.code != 200) throw new Error('user_info: ' + JSON.stringify(devicesData));
-        const deviceId = devicesData.devices?.[0]?.device_id;
-        if (!deviceId) throw new Error('Нет устройств');
-
-        alert('🔍 6/6: events (deviceId=' + deviceId + ')');
-        const startTime = Math.floor(dateFrom.getTime() / 1000);
-        const endTime = Math.floor(Date.now() / 1000);
-        const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${deviceId}/events`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Cookie': `slnet=${slnetToken}` },
-            body: JSON.stringify({ from: startTime, to: endTime })
-        }, useProxy);
-        const eventsData = await eventsRes.json();
-
-        window.debugInfo = {
-            deviceId, userId,
-            totalEvents: eventsData.events?.length || 0,
-            firstEvents: eventsData.events?.slice(0, 5) || [],
-            raw: eventsData
-        };
-        
-        return eventsData.events || [];
-    } catch (err) {
-        if (err.message === 'CAPTCHA_REQUIRED') throw err;
-        throw new Error('fetchEvents: ' + err.message);
+    if (userLoginData.state === 0 && userLoginData.desc?.message?.includes('Captcha')) {
+        pendingLoginData = { login, password, dateFrom, useProxy };
+        currentCaptchaSid = userLoginData.desc.captchaSid;
+        if (captchaImg) captchaImg.src = userLoginData.desc.captchaImg;
+        if (captchaCodeInput) captchaCodeInput.value = '';
+        if (captchaBlock) captchaBlock.classList.remove('hidden');
+        throw new Error('CAPTCHA_REQUIRED');
     }
+    if (userLoginData.state !== 1) throw new Error('login: ' + JSON.stringify(userLoginData));
+    const userToken = userLoginData.desc.user_token;
+
+    alert('🔍 4/6: auth.slid');
+    const slnetRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/auth.slid`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slid_token: userToken })
+    }, useProxy);
+    const slnetData = await slnetRes.json();
+    if (slnetData.code != 200) throw new Error('auth.slid: ' + JSON.stringify(slnetData));
+
+    const setCookie = slnetRes.headers.get('X-Set-Cookie');
+    let slnetToken = slnetData.slnet;
+    if (!slnetToken && setCookie) {
+        const m = setCookie.match(/slnet=([^;]+)/);
+        if (m) slnetToken = m[1];
+    }
+    const userId = slnetData.user_id;
+    if (!userId || !slnetToken) throw new Error('Нет user_id или slnet');
+
+    alert('🔍 5/6: user_info');
+    const devicesRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/user/${userId}/user_info`, {
+        headers: { 'X-Cookie': `slnet=${slnetToken}`, 'Content-Type': 'application/json' }
+    }, useProxy);
+    const devicesData = await devicesRes.json();
+    if (devicesData.code != 200) throw new Error('user_info: ' + JSON.stringify(devicesData));
+    const deviceId = devicesData.devices?.[0]?.device_id;
+    if (!deviceId) throw new Error('Нет устройств');
+
+    alert('🔍 6/6: events');
+    const startTime = Math.floor(dateFrom.getTime() / 1000);
+    const endTime = Math.floor(Date.now() / 1000);
+    const eventsRes = await fetchWithProxy(`${STARLINE_API_URL}/json/v2/device/${deviceId}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Cookie': `slnet=${slnetToken}` },
+        body: JSON.stringify({ from: startTime, to: endTime })
+    }, useProxy);
+    const eventsData = await eventsRes.json();
+
+    window.debugInfo = {
+        deviceId, userId,
+        totalEvents: eventsData.events?.length || 0,
+        firstEvents: eventsData.events?.slice(0, 5) || []
+    };
+    
+    return eventsData.events || [];
 }
 
 // ===== ПОДСЧЁТ =====
@@ -341,12 +354,12 @@ function displayResults(result) {
     const h = Math.floor(result.totalMs / (1000 * 60 * 60));
     const m = Math.floor((result.totalMs % (1000 * 60 * 60)) / (1000 * 60));
 
-    document.getElementById('totalHours').textContent = h;
-    document.getElementById('totalMinutes').textContent = `${m} минут`;
-    document.getElementById('daysCount').textContent = result.byDay.length;
-    document.getElementById('startsCount').textContent = result.sessions.length;
+    $('totalHours').textContent = h;
+    $('totalMinutes').textContent = `${m} минут`;
+    $('daysCount').textContent = result.byDay.length;
+    $('startsCount').textContent = result.sessions.length;
 
-    const dailyEl = document.getElementById('dailyResults');
+    const dailyEl = $('dailyResults');
     dailyEl.innerHTML = '';
 
     if (window.debugInfo) {
@@ -366,7 +379,7 @@ function displayResults(result) {
     if (result.byDay.length === 0) {
         const noData = document.createElement('p');
         noData.style.cssText = 'text-align:center;color:#888;padding:20px;';
-        noData.textContent = 'Событий запуска/остановки не найдено. Проверь жёлтый блок выше.';
+        noData.textContent = 'Событий запуска/остановки не найдено.';
         dailyEl.appendChild(noData);
     } else {
         for (const day of result.byDay) {
@@ -398,7 +411,8 @@ function formatDuration(ms) {
     return `${h}ч ${m}м`;
 }
 function showError(msg) {
-    if (msg === 'CAPTCHA_REQUIRED') return;
-    errorEl.textContent = msg;
-    errorEl.classList.remove('hidden');
+    if (errorEl) {
+        errorEl.textContent = msg;
+        errorEl.classList.remove('hidden');
+    }
 }
